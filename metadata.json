@@ -1,0 +1,6 @@
+{
+  "name": "BlueLight",
+  "description": "PocketMine-MP & BlueLight server manager for Android with an Android 15-compatible ANSI console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
