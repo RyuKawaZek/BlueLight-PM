@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,18 +34,23 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VerticalAlignBottom
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
@@ -69,15 +75,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.console.AnsiParser
+import com.example.console.ConsoleLogLevel
+import com.example.console.ConsoleTools
+import com.example.server.BlueLightPreferencesCodec
 import com.example.server.ConsoleLine
+import com.example.server.OverlayMacro
 import com.example.server.ServerStatus
 import com.example.ui.theme.Amber400
 import com.example.ui.theme.ConsoleColorTokens
@@ -88,8 +100,6 @@ import com.example.ui.theme.Rose400
 import com.example.ui.theme.toTokens
 import kotlinx.coroutines.launch
 
-private val quickCommands = listOf("help", "list", "version", "plugins", "stop")
-
 @Composable
 fun ConsoleScreen(
     consoleLines: List<ConsoleLine>,
@@ -99,6 +109,7 @@ fun ConsoleScreen(
     autoScroll: Boolean,
     consoleThemeStyle: ConsoleThemeStyle,
     commandHistory: List<String>,
+    quickMacros: List<OverlayMacro>,
     isOverlayActive: Boolean,
     onToggleOverlay: () -> Unit,
     onSendCommand: (String) -> Unit,
@@ -117,8 +128,24 @@ fun ConsoleScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    var commandText by remember { mutableStateOf("") }
+    var commandValue by remember { mutableStateOf(TextFieldValue("")) }
     var historyCursor by remember { mutableIntStateOf(-1) }
+
+    var selectedLogLevel by remember { mutableStateOf(ConsoleLogLevel.ALL) }
+    var showSearchBar by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredLines by remember(consoleLines, selectedLogLevel, searchQuery) {
+        derivedStateOf {
+            ConsoleTools.filterConsoleLines(consoleLines, selectedLogLevel, searchQuery)
+        }
+    }
+
+    val commandSuggestions by remember(commandValue.text, commandHistory) {
+        derivedStateOf {
+            ConsoleTools.suggestCommands(commandValue.text, commandHistory)
+        }
+    }
 
     val isAtBottom by remember {
         derivedStateOf {
@@ -128,9 +155,9 @@ fun ConsoleScreen(
         }
     }
 
-    LaunchedEffect(consoleLines.lastOrNull()?.id, autoScroll) {
-        if (autoScroll && consoleLines.isNotEmpty()) {
-            listState.scrollToItem(consoleLines.lastIndex)
+    LaunchedEffect(filteredLines.lastOrNull()?.id, autoScroll) {
+        if (autoScroll && filteredLines.isNotEmpty()) {
+            listState.scrollToItem(filteredLines.lastIndex)
         }
     }
 
@@ -149,7 +176,7 @@ fun ConsoleScreen(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Metrolist-style Floating Pill Header + Circular Action Buttons (using ConsoleColorTokens)
+        // Metrolist-style Floating Pill Header + Circular Action Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -181,8 +208,13 @@ fun ConsoleScreen(
                             color = tokens.toolbarContent,
                             maxLines = 1
                         )
+                        val countLabel = if (selectedLogLevel != ConsoleLogLevel.ALL || searchQuery.isNotBlank()) {
+                            "${filteredLines.size}/${consoleLines.size} lines"
+                        } else {
+                            "${consoleThemeStyle.label} • ${consoleLines.size} lines"
+                        }
                         Text(
-                            text = "${consoleThemeStyle.label} • ${consoleLines.size} lines",
+                            text = countLabel,
                             style = MaterialTheme.typography.labelSmall,
                             color = tokens.secondaryText,
                             maxLines = 1,
@@ -192,6 +224,20 @@ fun ConsoleScreen(
                 }
             }
 
+            ConsoleCircleAction(
+                icon = Icons.Rounded.Search,
+                contentDescription = stringResource(R.string.action_search_logs),
+                tokens = tokens,
+                active = showSearchBar || searchQuery.isNotBlank(),
+                onClick = {
+                    if (showSearchBar && searchQuery.isNotEmpty()) {
+                        searchQuery = ""
+                    } else {
+                        showSearchBar = !showSearchBar
+                    }
+                },
+                modifier = Modifier.testTag("console_search_toggle_button")
+            )
             ConsoleCircleAction(
                 icon = Icons.Rounded.PictureInPictureAlt,
                 contentDescription = if (isOverlayActive) {
@@ -224,7 +270,12 @@ fun ConsoleScreen(
                 contentDescription = stringResource(R.string.action_copy_logs),
                 tokens = tokens,
                 onClick = {
-                    clipboard.setText(AnnotatedString(onGetPlainLogText()))
+                    val plain = if (selectedLogLevel == ConsoleLogLevel.ALL && searchQuery.isBlank()) {
+                        onGetPlainLogText()
+                    } else {
+                        filteredLines.joinToString("\n") { AnsiParser.stripAnsi(it.rawText) }
+                    }
+                    clipboard.setText(AnnotatedString(plain))
                     Toast.makeText(context, R.string.message_copied, Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.testTag("console_copy_button")
@@ -238,6 +289,107 @@ fun ConsoleScreen(
             )
         }
 
+        // Collapsible Search Bar
+        AnimatedVisibility(visible = showSearchBar) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .clip(CircleShape)
+                    .background(tokens.inputContainer)
+                    .border(1.dp, tokens.border, CircleShape)
+                    .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = null,
+                    tint = tokens.promptAccent,
+                    modifier = Modifier.size(18.dp)
+                )
+                Box(modifier = Modifier.weight(1f)) {
+                    if (searchQuery.isEmpty()) {
+                        Text(
+                            text = "Filter past logs by keyword...",
+                            color = tokens.inputPlaceholder,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = tokens.inputText,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontSize = 13.sp
+                        ),
+                        cursorBrush = SolidColor(tokens.promptAccent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("console_search_input")
+                    )
+                }
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(
+                        onClick = { searchQuery = "" },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Clear search",
+                            tint = tokens.secondaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Log Level Filter Chip Row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ConsoleLogLevel.entries.forEach { level ->
+                val selected = selectedLogLevel == level
+                val levelAccent = when (level) {
+                    ConsoleLogLevel.ERROR -> Rose400
+                    ConsoleLogLevel.WARN -> Amber400
+                    ConsoleLogLevel.CHAT -> Emerald400
+                    else -> tokens.promptAccent
+                }
+                Surface(
+                    onClick = { selectedLogLevel = level },
+                    shape = CircleShape,
+                    color = if (selected) levelAccent.copy(alpha = 0.2f) else tokens.toolbarBackground,
+                    contentColor = if (selected) levelAccent else tokens.secondaryText,
+                    modifier = Modifier
+                        .border(
+                            width = 1.dp,
+                            color = if (selected) levelAccent else tokens.border,
+                            shape = CircleShape
+                        )
+                        .testTag("console_filter_${level.name.lowercase()}")
+                ) {
+                    Text(
+                        text = level.label,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
         // Main Framed Terminal Surface
         Box(
             modifier = Modifier
@@ -247,15 +399,20 @@ fun ConsoleScreen(
                 .background(tokens.toolbarBackground.copy(alpha = 0.35f))
                 .border(1.dp, tokens.border, RoundedCornerShape(22.dp))
         ) {
-            if (consoleLines.isEmpty()) {
+            if (filteredLines.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
+                    val emptyMsg = if (consoleLines.isEmpty()) {
+                        "Console output is empty. Start the server or enter a command below."
+                    } else {
+                        "No logs match ${selectedLogLevel.label}${if (searchQuery.isNotBlank()) " • \"$searchQuery\"" else ""}."
+                    }
                     Text(
-                        text = "Console output is empty. Start the server or enter a command below.",
+                        text = emptyMsg,
                         style = MaterialTheme.typography.bodyMedium,
                         fontFamily = JetBrainsMonoFontFamily,
                         color = tokens.secondaryText
@@ -272,7 +429,7 @@ fun ConsoleScreen(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         items(
-                            items = consoleLines,
+                            items = filteredLines,
                             key = { it.id }
                         ) { line ->
                             val parsed = remember(line.id, ansiEnabled, consoleThemeStyle) {
@@ -296,7 +453,7 @@ fun ConsoleScreen(
             }
 
             this@Column.AnimatedVisibility(
-                visible = consoleLines.isNotEmpty() && !isAtBottom,
+                visible = filteredLines.isNotEmpty() && !isAtBottom,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(12.dp)
@@ -304,7 +461,9 @@ fun ConsoleScreen(
                 SmallFloatingActionButton(
                     onClick = {
                         coroutineScope.launch {
-                            listState.animateScrollToItem(consoleLines.lastIndex)
+                            if (filteredLines.isNotEmpty()) {
+                                listState.animateScrollToItem(filteredLines.lastIndex)
+                            }
                         }
                     },
                     shape = CircleShape,
@@ -321,7 +480,78 @@ fun ConsoleScreen(
             }
         }
 
-        // Quick Command Pill Shelf
+        // `/` Command Autocomplete Suggestions Popup Card
+        AnimatedVisibility(visible = commandSuggestions.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = tokens.toolbarBackground,
+                contentColor = tokens.toolbarContent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, tokens.border, RoundedCornerShape(18.dp))
+                    .testTag("console_autocomplete_list")
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    commandSuggestions.forEachIndexed { idx, suggestion ->
+                        if (idx > 0) {
+                            HorizontalDivider(color = tokens.border.copy(alpha = 0.5f))
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val filled = if (suggestion.takesArgs) {
+                                        "${suggestion.command} "
+                                    } else {
+                                        suggestion.command
+                                    }
+                                    commandValue = TextFieldValue(
+                                        text = filled,
+                                        selection = TextRange(filled.length)
+                                    )
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (suggestion.fromHistory) {
+                                Icon(
+                                    imageVector = Icons.Rounded.History,
+                                    contentDescription = null,
+                                    tint = tokens.promptAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Text(
+                                text = suggestion.syntax,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tokens.promptAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = suggestion.description,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = tokens.secondaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Quick Command / Macro Pill Shelf
+        val macrosToShow = if (quickMacros.isEmpty()) {
+            BlueLightPreferencesCodec.defaultOverlayMacros()
+        } else {
+            quickMacros
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -329,16 +559,16 @@ fun ConsoleScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            quickCommands.forEach { cmd ->
+            macrosToShow.forEach { macro ->
                 Surface(
-                    onClick = { onSendCommand(cmd) },
+                    onClick = { onSendCommand(macro.command) },
                     color = tokens.toolbarBackground,
                     contentColor = tokens.promptAccent,
                     shape = CircleShape,
                     modifier = Modifier.border(1.dp, tokens.border, CircleShape)
                 ) {
                     Text(
-                        text = "/$cmd",
+                        text = macro.label,
                         fontFamily = JetBrainsMonoFontFamily,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
@@ -366,7 +596,8 @@ fun ConsoleScreen(
                             (historyCursor - 1).coerceAtLeast(0)
                         }
                         historyCursor = nextIndex
-                        commandText = commandHistory[nextIndex]
+                        val hist = commandHistory[nextIndex]
+                        commandValue = TextFieldValue(hist, TextRange(hist.length))
                     }
                 )
                 ConsoleCircleAction(
@@ -377,10 +608,11 @@ fun ConsoleScreen(
                         if (historyCursor >= 0) {
                             if (historyCursor >= commandHistory.lastIndex) {
                                 historyCursor = -1
-                                commandText = ""
+                                commandValue = TextFieldValue("")
                             } else {
                                 historyCursor += 1
-                                commandText = commandHistory[historyCursor]
+                                val hist = commandHistory[historyCursor]
+                                commandValue = TextFieldValue(hist, TextRange(hist.length))
                             }
                         }
                     }
@@ -405,7 +637,7 @@ fun ConsoleScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Box(modifier = Modifier.weight(1f)) {
-                    if (commandText.isEmpty()) {
+                    if (commandValue.text.isEmpty()) {
                         Text(
                             text = stringResource(R.string.command_input_hint),
                             color = tokens.inputPlaceholder,
@@ -416,8 +648,8 @@ fun ConsoleScreen(
                         )
                     }
                     BasicTextField(
-                        value = commandText,
-                        onValueChange = { commandText = it },
+                        value = commandValue,
+                        onValueChange = { commandValue = it },
                         singleLine = true,
                         textStyle = TextStyle(
                             color = tokens.inputText,
@@ -428,9 +660,9 @@ fun ConsoleScreen(
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(
                             onSend = {
-                                if (commandText.isNotBlank()) {
-                                    onSendCommand(commandText)
-                                    commandText = ""
+                                if (commandValue.text.isNotBlank()) {
+                                    onSendCommand(commandValue.text)
+                                    commandValue = TextFieldValue("")
                                     historyCursor = -1
                                 }
                             }
@@ -444,13 +676,13 @@ fun ConsoleScreen(
 
             Button(
                 onClick = {
-                    if (commandText.isNotBlank()) {
-                        onSendCommand(commandText)
-                        commandText = ""
+                    if (commandValue.text.isNotBlank()) {
+                        onSendCommand(commandValue.text)
+                        commandValue = TextFieldValue("")
                         historyCursor = -1
                     }
                 },
-                enabled = commandText.isNotBlank(),
+                enabled = commandValue.text.isNotBlank(),
                 shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = tokens.promptAccent,

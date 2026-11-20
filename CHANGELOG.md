@@ -7,6 +7,11 @@ and this project tracks regular feature updates, bug fixes, and automated debug 
 
 ## [Unreleased]
 
+### Added
+- **Floating Bubble Upgrades (`FloatingConsoleService`):** Saved bubble & panel coordinates across restarts (clamped to screen bounds), added bubble size (`Small`/`Medium`/`Large`) and opacity (`40%–100%`) controls in both Settings and an in-overlay quick-tune drawer, and added customizable 1-tap command macros (`/list`, `/save-all`, `/time set day`, `/gamemode c`, etc.).
+- **Console Filter, Search & Autocomplete (`ConsoleScreen`, `ConsoleTools`):** Added log-level filter chips (`All`, `Info`, `Warn`, `Error`, `Chat`), keyword search bar with filtered line count, and `/` command autocomplete suggestions with syntax hints and recent history.
+- **Multi-Server Profiles (`ServerRepository`, `ProfileManagerDialog`):** Added support for creating, renaming, deleting, and switching between isolated server workspaces under `/storage/emulated/0/PocketMine-Profiles/<slug>` alongside the default `/storage/emulated/0/PocketMine` workspace.
+
 ## [2.0.0] - 2026-11-20
 
 ### Added

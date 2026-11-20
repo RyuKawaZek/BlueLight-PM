@@ -25,6 +25,7 @@
     <string name="action_send">Send</string>
     <string name="action_copy_logs">Copy console log</string>
     <string name="action_clear_logs">Clear console</string>
+    <string name="action_search_logs">Search console logs</string>
     <string name="action_toggle_autoscroll">Toggle auto-scroll</string>
     <string name="action_cycle_console_theme">Switch console theme</string>
     <string name="command_input_hint">Enter server command (e.g. help, list, stop)</string>

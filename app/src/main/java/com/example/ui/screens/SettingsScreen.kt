@@ -23,23 +23,34 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ColorLens
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.FormatColorText
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Navigation
+import androidx.compose.material.icons.rounded.Opacity
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.VerticalAlignBottom
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -58,17 +69,24 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.console.AnsiParser
+import com.example.server.OverlayBubbleSize
+import com.example.server.OverlayMacro
+import com.example.server.ServerProfile
+import com.example.server.ServerStatus
 import com.example.server.ServerWorkspaceInfo
 import com.example.ui.components.MetroExpressiveSwitch
 import com.example.ui.components.MetroGroupedCustomBlock
 import com.example.ui.components.MetroGroupedRow
 import com.example.ui.components.MetroGroupedSection
 import com.example.ui.components.MetroPillChip
+import com.example.ui.components.OverlayMacroEditDialog
+import com.example.ui.components.ProfileManagerDialog
 import com.example.ui.theme.AccentPreset
 import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.ConsoleThemeStyle
@@ -94,6 +112,13 @@ fun SettingsScreen(
     ansiEnabled: Boolean,
     fontSizeSp: Float,
     autoScroll: Boolean,
+    overlayBubbleSize: OverlayBubbleSize,
+    overlayOpacityPercent: Int,
+    overlayMacros: List<OverlayMacro>,
+    profiles: List<ServerProfile>,
+    activeProfile: ServerProfile,
+    serverStatus: ServerStatus,
+    detectCoreLabel: (ServerProfile) -> String,
     workspaceInfo: ServerWorkspaceInfo,
     onSelectAppTheme: (AppThemeMode) -> Unit,
     onTogglePureBlack: (Boolean) -> Unit,
@@ -104,6 +129,16 @@ fun SettingsScreen(
     onToggleAnsi: (Boolean) -> Unit,
     onChangeFontSize: (Float) -> Unit,
     onToggleAutoScroll: (Boolean) -> Unit,
+    onSelectOverlayBubbleSize: (OverlayBubbleSize) -> Unit,
+    onChangeOverlayOpacity: (Int) -> Unit,
+    onAddOverlayMacro: (String, String) -> Unit,
+    onUpdateOverlayMacro: (String, String, String) -> Unit,
+    onRemoveOverlayMacro: (String) -> Unit,
+    onResetOverlayMacros: () -> Unit,
+    onSwitchProfile: (String) -> Unit,
+    onCreateProfile: (String, Boolean) -> Unit,
+    onRenameProfile: (String, String) -> Unit,
+    onDeleteProfile: (String, Boolean) -> Unit,
     onBackupLocal: () -> Unit,
     onBackupExport: () -> Unit,
     onDeleteServerData: () -> Unit,
@@ -114,6 +149,9 @@ fun SettingsScreen(
     BackHandler(onBack = onNavigateBack)
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showProfilesDialog by remember { mutableStateOf(false) }
+    var showAddMacroDialog by remember { mutableStateOf(false) }
+    var editingMacro by remember { mutableStateOf<OverlayMacro?>(null) }
     val previewTokens = consoleThemeStyle.toTokens()
     val supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
@@ -417,15 +455,203 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 3: Backups & Storage
+            // Section 3: Floating Bubble & 1-Tap Macros
             item {
                 MetroGroupedSection(
-                    title = "Backups & Storage",
-                    description = "Workspace: ${workspaceInfo.workspacePath}"
+                    title = "Floating Bubble & Macros",
+                    description = "Customize overlay size, transparency, and 1-tap commands (position saves automatically)"
+                ) {
+                    MetroGroupedCustomBlock(index = 0, count = 3) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PictureInPictureAlt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Bubble Size",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OverlayBubbleSize.entries.forEach { size ->
+                                MetroPillChip(
+                                    label = "${size.label} (${size.sizeDp}dp)",
+                                    selected = overlayBubbleSize == size,
+                                    onClick = { onSelectOverlayBubbleSize(size) },
+                                    modifier = Modifier.testTag("overlay_size_${size.name.lowercase()}")
+                                )
+                            }
+                        }
+                    }
+
+                    MetroGroupedCustomBlock(index = 1, count = 3) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Opacity,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Overlay Opacity",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                            Text(
+                                text = "$overlayOpacityPercent%",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Slider(
+                            value = overlayOpacityPercent.toFloat(),
+                            onValueChange = { onChangeOverlayOpacity(it.roundToInt()) },
+                            valueRange = 40f..100f,
+                            steps = 11,
+                            modifier = Modifier.testTag("overlay_opacity_slider")
+                        )
+                    }
+
+                    MetroGroupedCustomBlock(index = 2, count = 3) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Bolt,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Column {
+                                    Text(
+                                        text = "1-Tap Command Macros",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Shown in both Floating Overlay & Console",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = onResetOverlayMacros,
+                                modifier = Modifier.testTag("reset_macros_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.RestartAlt,
+                                    contentDescription = "Reset default macros"
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        overlayMacros.forEachIndexed { macroIdx, macro ->
+                            if (macroIdx > 0) {
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = macro.label,
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                    Text(
+                                        text = "/${macro.command}",
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { editingMacro = macro },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.DriveFileRenameOutline,
+                                        contentDescription = "Edit ${macro.label}",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onRemoveOverlayMacro(macro.id) },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.DeleteOutline,
+                                        contentDescription = "Remove ${macro.label}",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                        FilledTonalButton(
+                            onClick = { showAddMacroDialog = true },
+                            shape = CircleShape,
+                            modifier = Modifier.testTag("add_macro_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text("Add Macro", modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
+                }
+            }
+
+            // Section 4: Profiles, Backups & Storage
+            item {
+                MetroGroupedSection(
+                    title = "Profiles, Backups & Storage",
+                    description = "Active profile: ${activeProfile.name} (${workspaceInfo.workspacePath})"
                 ) {
                     MetroGroupedRow(
                         index = 0,
-                        count = 3,
+                        count = 4,
+                        title = "Server Profiles",
+                        subtitle = "${activeProfile.name} • ${profiles.size} configured",
+                        icon = Icons.Rounded.Layers,
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        onClick = { showProfilesDialog = true },
+                        modifier = Modifier.testTag("settings_profiles_row")
+                    )
+                    MetroGroupedRow(
+                        index = 1,
+                        count = 4,
                         title = stringResource(R.string.action_backup_server),
                         subtitle = "Local snapshots stored in PocketMine-Backups: ${workspaceInfo.backupCount}",
                         icon = Icons.Rounded.Archive,
@@ -434,8 +660,8 @@ fun SettingsScreen(
                         modifier = Modifier.testTag("backup_local_button")
                     )
                     MetroGroupedRow(
-                        index = 1,
-                        count = 3,
+                        index = 2,
+                        count = 4,
                         title = "Export Backup .zip",
                         subtitle = "Save a portable .zip archive via Android file picker",
                         icon = Icons.Rounded.FileUpload,
@@ -444,10 +670,10 @@ fun SettingsScreen(
                         modifier = Modifier.testTag("backup_export_button")
                     )
                     MetroGroupedRow(
-                        index = 2,
-                        count = 3,
+                        index = 3,
+                        count = 4,
                         title = stringResource(R.string.action_delete_server),
-                        subtitle = "Stops server and wipes workspace files (backups kept)",
+                        subtitle = "Stops server and wipes current profile files (backups kept)",
                         icon = Icons.Rounded.DeleteForever,
                         iconTint = MaterialTheme.colorScheme.error,
                         titleColor = MaterialTheme.colorScheme.error,
@@ -495,6 +721,41 @@ fun SettingsScreen(
                 TextButton(onClick = { showDeleteConfirm = false }) {
                     Text(stringResource(R.string.cancel))
                 }
+            }
+        )
+    }
+
+    if (showProfilesDialog) {
+        ProfileManagerDialog(
+            profiles = profiles,
+            activeProfile = activeProfile,
+            serverStatus = serverStatus,
+            detectCoreLabel = detectCoreLabel,
+            onSwitchProfile = onSwitchProfile,
+            onCreateProfile = onCreateProfile,
+            onRenameProfile = onRenameProfile,
+            onDeleteProfile = onDeleteProfile,
+            onDismiss = { showProfilesDialog = false }
+        )
+    }
+
+    if (showAddMacroDialog) {
+        OverlayMacroEditDialog(
+            onDismiss = { showAddMacroDialog = false },
+            onSave = { label, command ->
+                onAddOverlayMacro(label, command)
+                showAddMacroDialog = false
+            }
+        )
+    }
+
+    editingMacro?.let { target ->
+        OverlayMacroEditDialog(
+            initialMacro = target,
+            onDismiss = { editingMacro = null },
+            onSave = { label, command ->
+                onUpdateOverlayMacro(target.id, label, command)
+                editingMacro = null
             }
         )
     }

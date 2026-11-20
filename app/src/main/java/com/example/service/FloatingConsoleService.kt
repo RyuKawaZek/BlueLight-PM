@@ -9,6 +9,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -40,7 +41,10 @@ import androidx.core.content.res.ResourcesCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.console.AnsiParser
+import com.example.server.BlueLightPreferencesCodec
 import com.example.server.ConsoleLine
+import com.example.server.OverlayBubbleSize
+import com.example.server.OverlayMacro
 import com.example.server.ServerRepository
 import com.example.server.ServerStatus
 import com.example.ui.theme.ConsoleThemeStyle
@@ -60,10 +64,12 @@ class FloatingConsoleService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var repository: ServerRepository
+    private lateinit var prefs: SharedPreferences
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var rootContainer: FrameLayout? = null
     private var bubbleView: FrameLayout? = null
+    private var bubbleIconView: ImageView? = null
     private var panelView: LinearLayout? = null
     private var statusDotBubble: View? = null
     private var statusDotPanel: View? = null
@@ -71,10 +77,15 @@ class FloatingConsoleService : Service() {
     private var logScrollView: ScrollView? = null
     private var logTextView: TextView? = null
     private var commandInput: EditText? = null
+    private var macrosRow: LinearLayout? = null
+    private var quickControlsRow: LinearLayout? = null
+    private var sizeCycleBtn: TextView? = null
+    private var opacityCycleBtn: TextView? = null
     private var panelLayoutParams: WindowManager.LayoutParams? = null
 
     private var isExpanded = false
     private var isLargePanel = false
+    private var showQuickControls = false
 
     private var bubbleX = 32
     private var bubbleY = 260
@@ -84,7 +95,24 @@ class FloatingConsoleService : Service() {
     private var currentConsoleTokens = ConsoleThemeStyle.DARK_TERMINAL.toTokens()
     private var currentAnsiEnabled = true
     private var currentFontSizeSp = 12f
+    private var bubbleSize = OverlayBubbleSize.STANDARD
+    private var opacityPercent = 92
+    private var macros: List<OverlayMacro> = BlueLightPreferencesCodec.defaultOverlayMacros()
     private var latestLines: List<ConsoleLine> = emptyList()
+
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == KEY_OVERLAY_BUBBLE_SIZE ||
+            key == KEY_OVERLAY_OPACITY ||
+            key == KEY_OVERLAY_MACROS ||
+            key == "ansi_enabled" ||
+            key == "font_size_sp" ||
+            key == "console_theme_style"
+        ) {
+            loadPrefs()
+            applyOverlayAppearance()
+            rebuildMacroChips()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -95,11 +123,15 @@ class FloatingConsoleService : Service() {
 
         repository = ServerRepository.getInstance(applicationContext)
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        prefs = getSharedPreferences(ServerRepository.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
 
         loadPrefs()
         createNotificationChannel()
         startForegroundNotification()
         setupOverlayViews()
+        applyOverlayAppearance()
+        rebuildMacroChips()
         observeState()
         _isOverlayActive.value = true
     }
@@ -115,11 +147,20 @@ class FloatingConsoleService : Service() {
                     setExpanded(true)
                 }
             }
+            ACTION_REFRESH_CONFIG -> {
+                loadPrefs()
+                applyOverlayAppearance()
+                rebuildMacroChips()
+            }
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        savePositions()
+        if (::prefs.isInitialized) {
+            prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
+        }
         _isOverlayActive.value = false
         serviceScope.cancel()
         rootContainer?.let { view ->
@@ -133,12 +174,68 @@ class FloatingConsoleService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun loadPrefs() {
-        val prefs = getSharedPreferences("bluelight_prefs", Context.MODE_PRIVATE)
         currentAnsiEnabled = prefs.getBoolean("ansi_enabled", true)
         currentFontSizeSp = prefs.getFloat("font_size_sp", 13f).coerceIn(10f, 18f)
         val styleIdx = prefs.getInt("console_theme_style", 0)
         val style = ConsoleThemeStyle.entries.getOrElse(styleIdx) { ConsoleThemeStyle.DARK_TERMINAL }
         currentConsoleTokens = style.toTokens()
+
+        val sizeIdx = prefs.getInt(KEY_OVERLAY_BUBBLE_SIZE, OverlayBubbleSize.STANDARD.ordinal)
+        bubbleSize = OverlayBubbleSize.entries.getOrElse(sizeIdx) { OverlayBubbleSize.STANDARD }
+        opacityPercent = prefs.getInt(KEY_OVERLAY_OPACITY, 92).coerceIn(40, 100)
+        macros = BlueLightPreferencesCodec.decodeOverlayMacros(prefs.getString(KEY_OVERLAY_MACROS, null))
+
+        val dm = resources.displayMetrics
+        val maxX = (dm.widthPixels - dp(bubbleSize.sizeDp)).coerceAtLeast(0)
+        val maxY = (dm.heightPixels - dp(bubbleSize.sizeDp)).coerceAtLeast(0)
+        bubbleX = prefs.getInt(KEY_BUBBLE_X, 32).coerceIn(0, maxX)
+        bubbleY = prefs.getInt(KEY_BUBBLE_Y, 260).coerceIn(0, maxY)
+        panelX = prefs.getInt(KEY_PANEL_X, 24).coerceIn(0, (dm.widthPixels - dp(220)).coerceAtLeast(0))
+        panelY = prefs.getInt(KEY_PANEL_Y, 140).coerceIn(0, (dm.heightPixels - dp(220)).coerceAtLeast(0))
+    }
+
+    private fun savePositions() {
+        if (!::prefs.isInitialized) return
+        prefs.edit()
+            .putInt(KEY_BUBBLE_X, bubbleX)
+            .putInt(KEY_BUBBLE_Y, bubbleY)
+            .putInt(KEY_PANEL_X, panelX)
+            .putInt(KEY_PANEL_Y, panelY)
+            .apply()
+    }
+
+    private fun applyOverlayAppearance() {
+        val alphaFloat = (opacityPercent / 100f).coerceIn(0.4f, 1.0f)
+        val sizePx = dp(bubbleSize.sizeDp)
+        val iconPx = dp(bubbleSize.iconDp)
+        val dotPx = when (bubbleSize) {
+            OverlayBubbleSize.COMPACT -> dp(10)
+            OverlayBubbleSize.STANDARD -> dp(13)
+            OverlayBubbleSize.LARGE -> dp(15)
+        }
+
+        bubbleView?.let { bubble ->
+            bubble.alpha = alphaFloat
+            bubble.layoutParams = FrameLayout.LayoutParams(sizePx, sizePx)
+        }
+        bubbleIconView?.let { icon ->
+            icon.layoutParams = FrameLayout.LayoutParams(iconPx, iconPx, Gravity.CENTER)
+        }
+        statusDotBubble?.let { dot ->
+            dot.layoutParams = FrameLayout.LayoutParams(dotPx, dotPx, Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(3)
+                marginEnd = dp(3)
+            }
+        }
+        panelView?.alpha = alphaFloat
+        sizeCycleBtn?.text = "Size: ${bubbleSize.label}"
+        opacityCycleBtn?.text = "Opacity: $opacityPercent%"
+
+        val params = panelLayoutParams
+        val root = rootContainer
+        if (params != null && root != null) {
+            runCatching { windowManager.updateViewLayout(root, params) }
+        }
     }
 
     private fun startForegroundNotification() {
@@ -227,7 +324,7 @@ class FloatingConsoleService : Service() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildBubbleView(params: WindowManager.LayoutParams): FrameLayout {
-        val sizePx = dp(58)
+        val sizePx = dp(bubbleSize.sizeDp)
         val bubble = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(sizePx, sizePx)
             background = GradientDrawable().apply {
@@ -239,11 +336,12 @@ class FloatingConsoleService : Service() {
         }
 
         val iconView = ImageView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER)
+            layoutParams = FrameLayout.LayoutParams(dp(bubbleSize.iconDp), dp(bubbleSize.iconDp), Gravity.CENTER)
             setImageResource(R.drawable.ic_launcher_fg_art)
             scaleType = ImageView.ScaleType.CENTER_CROP
             clipToOutline = true
         }
+        bubbleIconView = iconView
         bubble.addView(iconView)
 
         val dot = View(this).apply {
@@ -282,15 +380,20 @@ class FloatingConsoleService : Service() {
                     if (abs(dx) > dp(6) || abs(dy) > dp(6)) {
                         moved = true
                     }
-                    params.x = (startX + dx).coerceAtLeast(0)
-                    params.y = (startY + dy).coerceAtLeast(0)
+                    val dm = resources.displayMetrics
+                    val maxX = (dm.widthPixels - dp(bubbleSize.sizeDp)).coerceAtLeast(0)
+                    val maxY = (dm.heightPixels - dp(bubbleSize.sizeDp)).coerceAtLeast(0)
+                    params.x = (startX + dx).coerceIn(0, maxX)
+                    params.y = (startY + dy).coerceIn(0, maxY)
                     bubbleX = params.x
                     bubbleY = params.y
                     runCatching { windowManager.updateViewLayout(rootContainer, params) }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) {
+                    if (moved) {
+                        savePositions()
+                    } else {
                         setExpanded(true)
                     }
                     true
@@ -315,8 +418,8 @@ class FloatingConsoleService : Service() {
         val hintHex = if (currentConsoleTokens.isDark) "#7D8590" else "#64748B"
         val accentHex = if (currentConsoleTokens.isDark) "#38BDF8" else "#1D4ED8"
 
-        val panelWidth = dp(330)
-        val panelHeight = dp(310)
+        val panelWidth = dp(334)
+        val panelHeight = dp(330)
 
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -334,7 +437,7 @@ class FloatingConsoleService : Service() {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(8), dp(8))
+            setPadding(dp(10), dp(8), dp(8), dp(8))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadii = floatArrayOf(
@@ -359,7 +462,7 @@ class FloatingConsoleService : Service() {
         header.addView(dot)
 
         val titleText = TextView(this).apply {
-            text = "BlueLight Console"
+            text = "Console"
             setTextColor(Color.parseColor(textHex))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             typeface = Typeface.DEFAULT_BOLD
@@ -371,12 +474,12 @@ class FloatingConsoleService : Service() {
             return TextView(this).apply {
                 text = label
                 setTextColor(Color.parseColor(textHex))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
-                minWidth = dp(34)
-                minHeight = dp(32)
-                setPadding(dp(8), dp(4), dp(8), dp(4))
+                minWidth = dp(32)
+                minHeight = dp(30)
+                setPadding(dp(7), dp(4), dp(7), dp(4))
                 if (bgColor != null) {
                     background = GradientDrawable().apply {
                         cornerRadius = dp(8).toFloat()
@@ -405,10 +508,16 @@ class FloatingConsoleService : Service() {
         serverToggleBtn = toggleServerBtn
         header.addView(toggleServerBtn)
 
+        val tuneBtn = headerActionButton("⚙") {
+            showQuickControls = !showQuickControls
+            quickControlsRow?.visibility = if (showQuickControls) View.VISIBLE else View.GONE
+        }
+        header.addView(tuneBtn)
+
         val resizeBtn = headerActionButton("⤢") {
             isLargePanel = !isLargePanel
-            val newW = if (isLargePanel) dp(360) else dp(330)
-            val newH = if (isLargePanel) dp(420) else dp(310)
+            val newW = if (isLargePanel) dp(364) else dp(334)
+            val newH = if (isLargePanel) dp(440) else dp(330)
             panel.layoutParams = FrameLayout.LayoutParams(newW, newH)
             runCatching { windowManager.updateViewLayout(rootContainer, params) }
         }
@@ -432,7 +541,7 @@ class FloatingConsoleService : Service() {
         }
         header.addView(closeBtn)
 
-        // Drag panel by header
+        // Drag panel by header and persist position
         var downRawX = 0f
         var downRawY = 0f
         var startX = 0
@@ -449,17 +558,77 @@ class FloatingConsoleService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - downRawX).toInt()
                     val dy = (event.rawY - downRawY).toInt()
-                    params.x = (startX + dx).coerceAtLeast(0)
-                    params.y = (startY + dy).coerceAtLeast(0)
+                    val dm = resources.displayMetrics
+                    params.x = (startX + dx).coerceIn(0, (dm.widthPixels - dp(120)).coerceAtLeast(0))
+                    params.y = (startY + dy).coerceIn(0, (dm.heightPixels - dp(120)).coerceAtLeast(0))
                     panelX = params.x
                     panelY = params.y
                     runCatching { windowManager.updateViewLayout(rootContainer, params) }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    savePositions()
                     true
                 }
                 else -> false
             }
         }
         panel.addView(header)
+
+        // Mini Size & Opacity Controls Drawer (collapsible via ⚙ button)
+        val controlsDrawer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.parseColor(toolbarHex))
+            setPadding(dp(10), dp(4), dp(10), dp(6))
+            visibility = View.GONE
+        }
+
+        val sizeBtn = TextView(this).apply {
+            text = "Size: ${bubbleSize.label}"
+            setTextColor(Color.parseColor(accentHex))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.parseColor(bgHex))
+                setStroke(dp(1), Color.parseColor(borderHex))
+            }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dp(6)
+            }
+            setOnClickListener {
+                val nextOrdinal = (bubbleSize.ordinal + 1) % OverlayBubbleSize.entries.size
+                prefs.edit().putInt(KEY_OVERLAY_BUBBLE_SIZE, nextOrdinal).apply()
+            }
+        }
+        sizeCycleBtn = sizeBtn
+        controlsDrawer.addView(sizeBtn)
+
+        val opacityBtn = TextView(this).apply {
+            text = "Opacity: $opacityPercent%"
+            setTextColor(Color.parseColor(accentHex))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.parseColor(bgHex))
+                setStroke(dp(1), Color.parseColor(borderHex))
+            }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                val steps = listOf(100, 85, 70, 55)
+                val nextVal = steps.firstOrNull { it < opacityPercent } ?: 100
+                prefs.edit().putInt(KEY_OVERLAY_OPACITY, nextVal).apply()
+            }
+        }
+        opacityCycleBtn = opacityBtn
+        controlsDrawer.addView(opacityBtn)
+
+        quickControlsRow = controlsDrawer
+        panel.addView(controlsDrawer)
 
         // Scrollable Console Log Area
         val scroll = ScrollView(this).apply {
@@ -485,39 +654,16 @@ class FloatingConsoleService : Service() {
         logTextView = logTv
         panel.addView(scroll)
 
-        // Quick command chips strip
+        // Customizable 1-tap Command Macros Strip
         val chipsScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             setBackgroundColor(Color.parseColor(toolbarHex))
-            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setPadding(dp(8), dp(5), dp(8), dp(5))
         }
         val chipsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
-        listOf("help", "list", "version", "plugins", "stop").forEach { cmd ->
-            val chip = TextView(this).apply {
-                text = cmd
-                typeface = monoTypeface
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                setTextColor(Color.parseColor(accentHex))
-                setPadding(dp(10), dp(4), dp(10), dp(4))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(6).toFloat()
-                    setColor(Color.parseColor(bgHex))
-                    setStroke(dp(1), Color.parseColor(borderHex))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    marginEnd = dp(6)
-                }
-                setOnClickListener {
-                    repository.writeCommand(cmd)
-                }
-            }
-            chipsRow.addView(chip)
-        }
+        macrosRow = chipsRow
         chipsScroll.addView(chipsRow)
         panel.addView(chipsScroll)
 
@@ -586,6 +732,44 @@ class FloatingConsoleService : Service() {
         panel.addView(inputRow)
 
         return panel
+    }
+
+    private fun rebuildMacroChips() {
+        val row = macrosRow ?: return
+        row.removeAllViews()
+
+        val monoTypeface = runCatching {
+            ResourcesCompat.getFont(this, R.font.jetbrains_mono)
+        }.getOrNull() ?: Typeface.MONOSPACE
+        val bgHex = if (currentConsoleTokens.isDark) "#EE0D1117" else "#F5F8FAFC"
+        val borderHex = if (currentConsoleTokens.isDark) "#30363D" else "#CBD5E1"
+        val accentHex = if (currentConsoleTokens.isDark) "#38BDF8" else "#1D4ED8"
+
+        val items = if (macros.isEmpty()) BlueLightPreferencesCodec.defaultOverlayMacros() else macros
+        items.forEach { macro ->
+            val chip = TextView(this).apply {
+                text = macro.label
+                typeface = monoTypeface
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                setTextColor(Color.parseColor(accentHex))
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(8).toFloat()
+                    setColor(Color.parseColor(bgHex))
+                    setStroke(dp(1), Color.parseColor(borderHex))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginEnd = dp(6)
+                }
+                setOnClickListener {
+                    repository.writeCommand(macro.command)
+                }
+            }
+            row.addView(chip)
+        }
     }
 
     private fun setExpanded(expanded: Boolean) {
@@ -684,6 +868,15 @@ class FloatingConsoleService : Service() {
         const val MAX_OVERLAY_LINES = 250
         const val ACTION_STOP_OVERLAY = "com.example.service.ACTION_STOP_OVERLAY"
         const val ACTION_EXPAND_OVERLAY = "com.example.service.ACTION_EXPAND_OVERLAY"
+        const val ACTION_REFRESH_CONFIG = "com.example.service.ACTION_REFRESH_CONFIG"
+
+        const val KEY_BUBBLE_X = "overlay_bubble_x"
+        const val KEY_BUBBLE_Y = "overlay_bubble_y"
+        const val KEY_PANEL_X = "overlay_panel_x"
+        const val KEY_PANEL_Y = "overlay_panel_y"
+        const val KEY_OVERLAY_BUBBLE_SIZE = "overlay_bubble_size"
+        const val KEY_OVERLAY_OPACITY = "overlay_opacity_percent"
+        const val KEY_OVERLAY_MACROS = "overlay_macros_json"
 
         private val _isOverlayActive = MutableStateFlow(false)
         val isOverlayActive: StateFlow<Boolean> = _isOverlayActive.asStateFlow()
@@ -697,6 +890,14 @@ class FloatingConsoleService : Service() {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, FloatingConsoleService::class.java))
+        }
+
+        fun refreshConfig(context: Context) {
+            if (!_isOverlayActive.value) return
+            val intent = Intent(context, FloatingConsoleService::class.java).apply {
+                action = ACTION_REFRESH_CONFIG
+            }
+            context.startService(intent)
         }
     }
 }

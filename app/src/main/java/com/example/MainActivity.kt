@@ -71,7 +71,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.server.OverlayBubbleSize
+import com.example.server.OverlayMacro
 import com.example.server.ServerFileItem
+import com.example.server.ServerProfile
 import com.example.server.ServerStatus
 import com.example.service.FloatingConsoleService
 import com.example.ui.components.MetroDockedBottomBar
@@ -176,6 +179,11 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
     val floatingNavBar by viewModel.floatingNavBar.collectAsStateWithLifecycle()
     val consoleThemeStyle by viewModel.consoleThemeStyle.collectAsStateWithLifecycle()
     val commandHistory by viewModel.commandHistory.collectAsStateWithLifecycle()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
+    val overlayBubbleSize by viewModel.overlayBubbleSize.collectAsStateWithLifecycle()
+    val overlayOpacityPercent by viewModel.overlayOpacityPercent.collectAsStateWithLifecycle()
+    val overlayMacros by viewModel.overlayMacros.collectAsStateWithLifecycle()
     val isOverlayActive by FloatingConsoleService.isOverlayActive.collectAsStateWithLifecycle()
 
     var pendingExportItem by remember { mutableStateOf<ServerFileItem?>(null) }
@@ -373,6 +381,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                         ShellFloatingTopBar(
                             selectedTab = selectedTab,
                             serverStatus = serverStatus,
+                            activeProfileName = activeProfile.name,
                             isOverlayActive = isOverlayActive,
                             onToggleOverlay = { setOverlayEnabled(!isOverlayActive) },
                             onRefresh = { viewModel.refreshWorkspace() }
@@ -402,6 +411,11 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             floatingNavBar = floatingNavBar,
                             consoleThemeStyle = consoleThemeStyle,
                             commandHistory = commandHistory,
+                            profiles = profiles,
+                            activeProfile = activeProfile,
+                            overlayBubbleSize = overlayBubbleSize,
+                            overlayOpacityPercent = overlayOpacityPercent,
+                            overlayMacros = overlayMacros,
                             isOverlayActive = isOverlayActive,
                             canDrawOverlays = canDrawOverlays,
                             onToggleOverlay = { setOverlayEnabled(it) },
@@ -478,6 +492,11 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                         floatingNavBar = floatingNavBar,
                         consoleThemeStyle = consoleThemeStyle,
                         commandHistory = commandHistory,
+                        profiles = profiles,
+                        activeProfile = activeProfile,
+                        overlayBubbleSize = overlayBubbleSize,
+                        overlayOpacityPercent = overlayOpacityPercent,
+                        overlayMacros = overlayMacros,
                         isOverlayActive = isOverlayActive,
                         canDrawOverlays = canDrawOverlays,
                         onToggleOverlay = { setOverlayEnabled(it) },
@@ -517,6 +536,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                     ShellFloatingTopBar(
                         selectedTab = selectedTab,
                         serverStatus = serverStatus,
+                        activeProfileName = activeProfile.name,
                         isOverlayActive = isOverlayActive,
                         onToggleOverlay = { setOverlayEnabled(!isOverlayActive) },
                         onRefresh = { viewModel.refreshWorkspace() }
@@ -550,6 +570,11 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             floatingNavBar = floatingNavBar,
                             consoleThemeStyle = consoleThemeStyle,
                             commandHistory = commandHistory,
+                            profiles = profiles,
+                            activeProfile = activeProfile,
+                            overlayBubbleSize = overlayBubbleSize,
+                            overlayOpacityPercent = overlayOpacityPercent,
+                            overlayMacros = overlayMacros,
                             isOverlayActive = isOverlayActive,
                             canDrawOverlays = canDrawOverlays,
                             onToggleOverlay = { setOverlayEnabled(it) },
@@ -632,6 +657,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
 private fun ShellFloatingTopBar(
     selectedTab: AppTab,
     serverStatus: ServerStatus,
+    activeProfileName: String,
     isOverlayActive: Boolean,
     onToggleOverlay: () -> Unit,
     onRefresh: () -> Unit
@@ -648,14 +674,17 @@ private fun ShellFloatingTopBar(
         AppTab.SETTINGS -> stringResource(R.string.nav_settings)
     }
     val subtitleText = when (selectedTab) {
-        AppTab.DASHBOARD -> when (serverStatus) {
-            ServerStatus.RUNNING -> "Online"
-            ServerStatus.STARTING -> "Starting"
-            ServerStatus.STOPPING -> "Stopping"
-            ServerStatus.STOPPED -> "Offline"
+        AppTab.DASHBOARD -> {
+            val statusWord = when (serverStatus) {
+                ServerStatus.RUNNING -> "Online"
+                ServerStatus.STARTING -> "Starting"
+                ServerStatus.STOPPING -> "Stopping"
+                ServerStatus.STOPPED -> "Offline"
+            }
+            "$statusWord • $activeProfileName"
         }
-        AppTab.FILES -> "/PocketMine"
-        AppTab.SETTINGS -> "Theme & Storage"
+        AppTab.FILES -> activeProfileName
+        AppTab.SETTINGS -> "Theme, Overlay & Profiles"
         AppTab.CONSOLE -> ""
     }
 
@@ -727,6 +756,11 @@ private fun ScreenContentSwitch(
     floatingNavBar: Boolean,
     consoleThemeStyle: com.example.ui.theme.ConsoleThemeStyle,
     commandHistory: List<String>,
+    profiles: List<ServerProfile>,
+    activeProfile: ServerProfile,
+    overlayBubbleSize: OverlayBubbleSize,
+    overlayOpacityPercent: Int,
+    overlayMacros: List<OverlayMacro>,
     isOverlayActive: Boolean,
     canDrawOverlays: Boolean,
     onToggleOverlay: (Boolean) -> Unit,
@@ -744,6 +778,9 @@ private fun ScreenContentSwitch(
                 workspaceInfo = workspaceInfo,
                 serverProperties = serverProperties,
                 operationProgress = operationProgress,
+                profiles = profiles,
+                activeProfile = activeProfile,
+                detectCoreLabel = { viewModel.detectCoreLabelForProfile(it) },
                 isOverlayActive = isOverlayActive,
                 canDrawOverlays = canDrawOverlays,
                 onToggleOverlay = onToggleOverlay,
@@ -763,6 +800,10 @@ private fun ScreenContentSwitch(
                 },
                 onRefreshWorkspace = { viewModel.refreshWorkspace() },
                 onSaveProperties = { updated -> viewModel.saveServerProperties(updated) },
+                onSwitchProfile = { viewModel.switchProfile(it) },
+                onCreateProfile = { name, copyProps -> viewModel.createProfile(name, copyProps) },
+                onRenameProfile = { id, newName -> viewModel.renameProfile(id, newName) },
+                onDeleteProfile = { id, deleteFiles -> viewModel.deleteProfile(id, deleteFiles) },
                 onDismissProgress = { viewModel.dismissOperationProgress() },
                 bottomContentPadding = bottomContentPadding
             )
@@ -775,6 +816,7 @@ private fun ScreenContentSwitch(
                 autoScroll = autoScroll,
                 consoleThemeStyle = consoleThemeStyle,
                 commandHistory = commandHistory,
+                quickMacros = overlayMacros,
                 isOverlayActive = isOverlayActive,
                 onToggleOverlay = { onToggleOverlay(!isOverlayActive) },
                 onSendCommand = { viewModel.sendCommand(it) },
@@ -821,6 +863,13 @@ private fun ScreenContentSwitch(
                 ansiEnabled = ansiEnabled,
                 fontSizeSp = fontSizeSp,
                 autoScroll = autoScroll,
+                overlayBubbleSize = overlayBubbleSize,
+                overlayOpacityPercent = overlayOpacityPercent,
+                overlayMacros = overlayMacros,
+                profiles = profiles,
+                activeProfile = activeProfile,
+                serverStatus = serverStatus,
+                detectCoreLabel = { viewModel.detectCoreLabelForProfile(it) },
                 workspaceInfo = workspaceInfo,
                 onSelectAppTheme = { viewModel.setAppThemeMode(it) },
                 onTogglePureBlack = { viewModel.setPureBlack(it) },
@@ -831,6 +880,16 @@ private fun ScreenContentSwitch(
                 onToggleAnsi = { viewModel.setAnsiEnabled(it) },
                 onChangeFontSize = { viewModel.setFontSizeSp(it) },
                 onToggleAutoScroll = { viewModel.setAutoScroll(it) },
+                onSelectOverlayBubbleSize = { viewModel.setOverlayBubbleSize(it) },
+                onChangeOverlayOpacity = { viewModel.setOverlayOpacityPercent(it) },
+                onAddOverlayMacro = { label, command -> viewModel.addOverlayMacro(label, command) },
+                onUpdateOverlayMacro = { id, label, command -> viewModel.updateOverlayMacro(id, label, command) },
+                onRemoveOverlayMacro = { viewModel.removeOverlayMacro(it) },
+                onResetOverlayMacros = { viewModel.resetOverlayMacros() },
+                onSwitchProfile = { viewModel.switchProfile(it) },
+                onCreateProfile = { name, copyProps -> viewModel.createProfile(name, copyProps) },
+                onRenameProfile = { id, newName -> viewModel.renameProfile(id, newName) },
+                onDeleteProfile = { id, deleteFiles -> viewModel.deleteProfile(id, deleteFiles) },
                 onBackupLocal = { viewModel.backupServer(null) },
                 onBackupExport = onBackupExport,
                 onDeleteServerData = { viewModel.deleteServerData() },

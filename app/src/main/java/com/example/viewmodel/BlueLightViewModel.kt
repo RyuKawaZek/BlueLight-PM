@@ -6,13 +6,18 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.console.AnsiParser
+import com.example.server.BlueLightPreferencesCodec
 import com.example.server.ConsoleLine
 import com.example.server.OperationProgress
+import com.example.server.OverlayBubbleSize
+import com.example.server.OverlayMacro
 import com.example.server.ServerFileItem
+import com.example.server.ServerProfile
 import com.example.server.ServerPropertiesConfig
 import com.example.server.ServerRepository
 import com.example.server.ServerStatus
 import com.example.server.ServerWorkspaceInfo
+import com.example.service.FloatingConsoleService
 import com.example.ui.theme.AccentPreset
 import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.ConsoleThemeStyle
@@ -40,7 +45,7 @@ sealed class TextEditorState {
 
 class BlueLightViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val prefs = application.getSharedPreferences("bluelight_prefs", Context.MODE_PRIVATE)
+    private val prefs = application.getSharedPreferences(ServerRepository.PREFS_NAME, Context.MODE_PRIVATE)
     private val repository = ServerRepository.getInstance(application)
 
     val serverStatus: StateFlow<ServerStatus> = repository.status
@@ -50,6 +55,8 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
     val serverProperties: StateFlow<ServerPropertiesConfig> = repository.serverProperties
     val currentRelativePath: StateFlow<String> = repository.currentRelativePath
     val browserFiles: StateFlow<List<ServerFileItem>> = repository.browserFiles
+    val profiles: StateFlow<List<ServerProfile>> = repository.profiles
+    val activeProfile: StateFlow<ServerProfile> = repository.activeProfile
 
     private val _selectedTab = MutableStateFlow(AppTab.DASHBOARD)
     val selectedTab: StateFlow<AppTab> = _selectedTab.asStateFlow()
@@ -91,6 +98,25 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _commandHistory = MutableStateFlow<List<String>>(emptyList())
     val commandHistory: StateFlow<List<String>> = _commandHistory.asStateFlow()
+
+    private val _overlayBubbleSize = MutableStateFlow(
+        OverlayBubbleSize.entries.getOrElse(
+            prefs.getInt(FloatingConsoleService.KEY_OVERLAY_BUBBLE_SIZE, OverlayBubbleSize.STANDARD.ordinal)
+        ) { OverlayBubbleSize.STANDARD }
+    )
+    val overlayBubbleSize: StateFlow<OverlayBubbleSize> = _overlayBubbleSize.asStateFlow()
+
+    private val _overlayOpacityPercent = MutableStateFlow(
+        prefs.getInt(FloatingConsoleService.KEY_OVERLAY_OPACITY, 92).coerceIn(40, 100)
+    )
+    val overlayOpacityPercent: StateFlow<Int> = _overlayOpacityPercent.asStateFlow()
+
+    private val _overlayMacros = MutableStateFlow(
+        BlueLightPreferencesCodec.decodeOverlayMacros(
+            prefs.getString(FloatingConsoleService.KEY_OVERLAY_MACROS, null)
+        )
+    )
+    val overlayMacros: StateFlow<List<OverlayMacro>> = _overlayMacros.asStateFlow()
 
     private val _textEditorState = MutableStateFlow<TextEditorState>(TextEditorState.Closed)
     val textEditorState: StateFlow<TextEditorState> = _textEditorState.asStateFlow()
@@ -211,6 +237,82 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
     fun refreshWorkspace() {
         repository.refreshWorkspaceInfo()
         repository.loadServerProperties()
+    }
+
+    // --- Multi-Server Profiles ---
+
+    fun switchProfile(profileId: String): Boolean {
+        return repository.switchProfile(profileId)
+    }
+
+    fun createProfile(name: String, copyPropertiesFromCurrent: Boolean = false) {
+        repository.createProfile(name = name, copyPropertiesFromCurrent = copyPropertiesFromCurrent, switchAfterCreate = true)
+    }
+
+    fun renameProfile(profileId: String, newName: String) {
+        repository.renameProfile(profileId, newName)
+    }
+
+    fun deleteProfile(profileId: String, deleteFiles: Boolean) {
+        repository.deleteProfile(profileId, deleteFiles)
+    }
+
+    fun detectCoreLabelForProfile(profile: ServerProfile): String {
+        return repository.detectCoreLabelForProfile(profile)
+    }
+
+    // --- Floating Overlay Customization ---
+
+    fun setOverlayBubbleSize(size: OverlayBubbleSize) {
+        _overlayBubbleSize.value = size
+        prefs.edit().putInt(FloatingConsoleService.KEY_OVERLAY_BUBBLE_SIZE, size.ordinal).apply()
+        FloatingConsoleService.refreshConfig(getApplication())
+    }
+
+    fun setOverlayOpacityPercent(percent: Int) {
+        val clamped = percent.coerceIn(40, 100)
+        _overlayOpacityPercent.value = clamped
+        prefs.edit().putInt(FloatingConsoleService.KEY_OVERLAY_OPACITY, clamped).apply()
+        FloatingConsoleService.refreshConfig(getApplication())
+    }
+
+    fun addOverlayMacro(label: String, command: String) {
+        val cleanCmd = command.trim().removePrefix("/")
+        if (cleanCmd.isEmpty()) return
+        val cleanLabel = label.trim().ifEmpty { "/$cleanCmd" }
+        val macro = OverlayMacro(
+            id = "macro_${System.currentTimeMillis()}",
+            label = cleanLabel,
+            command = cleanCmd
+        )
+        persistOverlayMacros(_overlayMacros.value + macro)
+    }
+
+    fun updateOverlayMacro(id: String, label: String, command: String) {
+        val cleanCmd = command.trim().removePrefix("/")
+        if (cleanCmd.isEmpty()) return
+        val cleanLabel = label.trim().ifEmpty { "/$cleanCmd" }
+        persistOverlayMacros(
+            _overlayMacros.value.map {
+                if (it.id == id) it.copy(label = cleanLabel, command = cleanCmd) else it
+            }
+        )
+    }
+
+    fun removeOverlayMacro(id: String) {
+        persistOverlayMacros(_overlayMacros.value.filterNot { it.id == id })
+    }
+
+    fun resetOverlayMacros() {
+        persistOverlayMacros(BlueLightPreferencesCodec.defaultOverlayMacros())
+    }
+
+    private fun persistOverlayMacros(macros: List<OverlayMacro>) {
+        _overlayMacros.value = macros
+        prefs.edit()
+            .putString(FloatingConsoleService.KEY_OVERLAY_MACROS, BlueLightPreferencesCodec.encodeOverlayMacros(macros))
+            .apply()
+        FloatingConsoleService.refreshConfig(getApplication())
     }
 
     // --- File Manager Actions ---

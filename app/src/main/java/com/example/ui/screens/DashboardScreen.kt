@@ -67,7 +67,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.R
+import androidx.compose.material.icons.rounded.Layers
 import com.example.server.OperationProgress
+import com.example.server.ServerProfile
 import com.example.server.ServerPropertiesConfig
 import com.example.server.ServerStatus
 import com.example.server.ServerWorkspaceInfo
@@ -78,6 +80,7 @@ import com.example.ui.components.MetroGroupedSection
 import com.example.ui.components.MetroOperationBanner
 import com.example.ui.components.MetroPillChip
 import com.example.ui.components.MetroStoragePermissionCard
+import com.example.ui.components.ProfileManagerDialog
 import com.example.ui.theme.Amber400
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.JetBrainsMonoFontFamily
@@ -89,6 +92,9 @@ fun DashboardScreen(
     workspaceInfo: ServerWorkspaceInfo,
     serverProperties: ServerPropertiesConfig,
     operationProgress: OperationProgress,
+    profiles: List<ServerProfile>,
+    activeProfile: ServerProfile,
+    detectCoreLabel: (ServerProfile) -> String,
     isOverlayActive: Boolean,
     canDrawOverlays: Boolean,
     onToggleOverlay: (Boolean) -> Unit,
@@ -102,12 +108,17 @@ fun DashboardScreen(
     onDownloadBlueLight: (String?) -> Unit,
     onRefreshWorkspace: () -> Unit,
     onSaveProperties: (ServerPropertiesConfig) -> Unit,
+    onSwitchProfile: (String) -> Unit,
+    onCreateProfile: (String, Boolean) -> Unit,
+    onRenameProfile: (String, String) -> Unit,
+    onDeleteProfile: (String, Boolean) -> Unit,
     onDismissProgress: () -> Unit,
     bottomContentPadding: Dp = 16.dp,
     modifier: Modifier = Modifier
 ) {
     var showCustomDownloadDialog by remember { mutableStateOf(false) }
     var showPropertiesDialog by remember { mutableStateOf(false) }
+    var showProfilesDialog by remember { mutableStateOf(false) }
 
     val isBusy = serverStatus == ServerStatus.RUNNING ||
         serverStatus == ServerStatus.STARTING ||
@@ -160,6 +171,12 @@ fun DashboardScreen(
                         icon = Icons.Rounded.Tune,
                         onClick = { showPropertiesDialog = true }
                     )
+                    MetroPillChip(
+                        label = "Profiles (${profiles.size})",
+                        icon = Icons.Rounded.Layers,
+                        onClick = { showProfilesDialog = true },
+                        modifier = Modifier.testTag("profiles_chip_button")
+                    )
                 }
             }
 
@@ -168,11 +185,13 @@ fun DashboardScreen(
                 ServerHeroCard(
                     serverStatus = serverStatus,
                     workspaceInfo = workspaceInfo,
+                    activeProfileName = activeProfile.name,
                     port = serverProperties.port,
                     onStartServer = onStartServer,
                     onStopServer = onStopServer,
                     onForceKillServer = onForceKillServer,
                     onOpenConsole = onOpenConsole,
+                    onOpenProfiles = { showProfilesDialog = true },
                     onRefreshWorkspace = onRefreshWorkspace,
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
@@ -206,7 +225,26 @@ fun DashboardScreen(
                 ) {
                     MetroGroupedRow(
                         index = 0,
-                        count = 4,
+                        count = 5,
+                        title = "Server Profile",
+                        subtitle = "${activeProfile.name} • ${profiles.size} profile(s)",
+                        icon = Icons.Rounded.Layers,
+                        iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        onClick = { showProfilesDialog = true },
+                        trailingContent = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        modifier = Modifier.testTag("server_profile_row")
+                    )
+                    MetroGroupedRow(
+                        index = 1,
+                        count = 5,
                         title = "Floating Console Bubble",
                         subtitle = when {
                             !canDrawOverlays -> "Grant Display over other apps to float over Minecraft"
@@ -227,8 +265,8 @@ fun DashboardScreen(
                         }
                     )
                     MetroGroupedRow(
-                        index = 1,
-                        count = 4,
+                        index = 2,
+                        count = 5,
                         title = "Detected Core",
                         subtitle = workspaceInfo.detectedCoreLabel,
                         icon = Icons.Rounded.Code,
@@ -236,8 +274,8 @@ fun DashboardScreen(
                         onClick = if (!isBusy) onImportCore else null
                     )
                     MetroGroupedRow(
-                        index = 2,
-                        count = 4,
+                        index = 3,
+                        count = 5,
                         title = "PHP Runtime Engine",
                         subtitle = if (workspaceInfo.phpBinaryAvailable) {
                             "Ready (arm64-v8a static binary)"
@@ -248,8 +286,8 @@ fun DashboardScreen(
                         iconTint = if (workspaceInfo.phpBinaryAvailable) Emerald400 else Rose400
                     )
                     MetroGroupedRow(
-                        index = 3,
-                        count = 4,
+                        index = 4,
+                        count = 5,
                         title = "Shared Workspace Folder",
                         subtitle = workspaceInfo.workspacePath,
                         icon = Icons.Rounded.FolderOpen,
@@ -349,6 +387,20 @@ fun DashboardScreen(
             }
         )
     }
+
+    if (showProfilesDialog) {
+        ProfileManagerDialog(
+            profiles = profiles,
+            activeProfile = activeProfile,
+            serverStatus = serverStatus,
+            detectCoreLabel = detectCoreLabel,
+            onSwitchProfile = onSwitchProfile,
+            onCreateProfile = onCreateProfile,
+            onRenameProfile = onRenameProfile,
+            onDeleteProfile = onDeleteProfile,
+            onDismiss = { showProfilesDialog = false }
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -356,11 +408,13 @@ fun DashboardScreen(
 private fun ServerHeroCard(
     serverStatus: ServerStatus,
     workspaceInfo: ServerWorkspaceInfo,
+    activeProfileName: String,
     port: String,
     onStartServer: () -> Unit,
     onStopServer: () -> Unit,
     onForceKillServer: () -> Unit,
     onOpenConsole: () -> Unit,
+    onOpenProfiles: () -> Unit,
     onRefreshWorkspace: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -428,7 +482,7 @@ private fun ServerHeroCard(
                         }
 
                         Text(
-                            text = "BlueLight Server",
+                            text = activeProfileName,
                             style = MaterialTheme.typography.headlineSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -438,6 +492,19 @@ private fun ServerHeroCard(
                             fontFamily = JetBrainsMonoFontFamily,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                         )
+                        TextButton(
+                            onClick = onOpenProfiles,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.testTag("hero_switch_profile_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Layers,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Switch Profile")
+                        }
                     }
 
                     IconButton(

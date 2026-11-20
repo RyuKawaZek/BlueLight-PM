@@ -55,6 +55,8 @@ data class ConsoleLine(
 )
 
 data class ServerWorkspaceInfo(
+    val profileId: String = ServerProfile.DEFAULT_PROFILE_ID,
+    val profileName: String = "Default (PocketMine)",
     val workspacePath: String = "",
     val hasStorageAccess: Boolean = false,
     val hasPhar: Boolean = false,
@@ -127,6 +129,16 @@ class ServerRepository private constructor(private val appContext: Context) {
         .followRedirects(true)
         .build()
 
+    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private val _profiles = MutableStateFlow<List<ServerProfile>>(
+        BlueLightPreferencesCodec.decodeProfiles(prefs.getString(KEY_SERVER_PROFILES, null))
+    )
+    val profiles: StateFlow<List<ServerProfile>> = _profiles.asStateFlow()
+
+    private val _activeProfile = MutableStateFlow(resolveSavedActiveProfile())
+    val activeProfile: StateFlow<ServerProfile> = _activeProfile.asStateFlow()
+
     private val _status = MutableStateFlow(ServerStatus.STOPPED)
     val status: StateFlow<ServerStatus> = _status.asStateFlow()
 
@@ -170,6 +182,11 @@ class ServerRepository private constructor(private val appContext: Context) {
         appendSystemDiagnosticBanner()
     }
 
+    private fun resolveSavedActiveProfile(): ServerProfile {
+        val savedId = prefs.getString(KEY_ACTIVE_PROFILE_ID, ServerProfile.DEFAULT_PROFILE_ID)
+        return _profiles.value.firstOrNull { it.id == savedId } ?: ServerProfile.defaultProfile()
+    }
+
     fun hasStorageAccess(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -181,12 +198,157 @@ class ServerRepository private constructor(private val appContext: Context) {
         }
     }
 
+    fun getProfilesRootDirectory(): File {
+        return File(Environment.getExternalStorageDirectory(), "PocketMine-Profiles")
+    }
+
+    fun getDataDirectoryForProfile(profile: ServerProfile): File {
+        return if (profile.isDefault || profile.id == ServerProfile.DEFAULT_PROFILE_ID || profile.directoryName.isBlank()) {
+            File(Environment.getExternalStorageDirectory(), "PocketMine")
+        } else {
+            File(getProfilesRootDirectory(), profile.directoryName)
+        }
+    }
+
     fun getDataDirectory(): File {
-        return File(Environment.getExternalStorageDirectory(), "PocketMine")
+        return getDataDirectoryForProfile(_activeProfile.value)
     }
 
     fun getBackupDirectory(): File {
         return File(Environment.getExternalStorageDirectory(), "PocketMine-Backups")
+    }
+
+    fun detectCoreLabelForProfile(profile: ServerProfile): String {
+        if (!hasStorageAccess()) return "Storage permission required"
+        val dir = getDataDirectoryForProfile(profile)
+        return when {
+            File(dir, "PocketMine-MP.phar").exists() -> "PocketMine-MP.phar"
+            File(dir, "src/pocketmine/PocketMine.php").exists() -> "src/pocketmine/PocketMine.php"
+            else -> "No server core installed"
+        }
+    }
+
+    fun switchProfile(profileId: String): Boolean {
+        if (_status.value != ServerStatus.STOPPED) {
+            _operationProgress.value = OperationProgress.Error("Stop the running server before switching profiles")
+            return false
+        }
+        val target = _profiles.value.firstOrNull { it.id == profileId } ?: return false
+        if (_activeProfile.value.id == target.id) return true
+
+        _activeProfile.value = target
+        prefs.edit().putString(KEY_ACTIVE_PROFILE_ID, target.id).apply()
+        _currentRelativePath.value = ""
+        ensureDirectories()
+        refreshWorkspaceInfo()
+        loadServerProperties()
+        appendLog("\u001B[1;36m[BlueLight]\u001B[0m Switched active profile to '${target.name}' (${getDataDirectory().absolutePath})")
+        return true
+    }
+
+    fun createProfile(
+        name: String,
+        copyPropertiesFromCurrent: Boolean = false,
+        switchAfterCreate: Boolean = true
+    ): ServerProfile? {
+        val trimmedName = name.trim()
+        if (trimmedName.isEmpty()) {
+            _operationProgress.value = OperationProgress.Error("Profile name cannot be empty")
+            return null
+        }
+
+        val currentProfiles = _profiles.value
+        val baseSlug = ServerProfile.sanitizeSlug(trimmedName)
+        val existingDirs = currentProfiles.map { it.directoryName.lowercase(Locale.US) }.toSet()
+        var candidateDir = baseSlug
+        var suffix = 2
+        while (candidateDir.lowercase(Locale.US) in existingDirs ||
+            File(getProfilesRootDirectory(), candidateDir).exists()
+        ) {
+            candidateDir = "$baseSlug-$suffix"
+            suffix += 1
+        }
+
+        val profile = ServerProfile(
+            id = "profile_${System.currentTimeMillis()}_$suffix",
+            name = trimmedName,
+            directoryName = candidateDir,
+            isDefault = false
+        )
+
+        val previousDir = getDataDirectory()
+        val targetDir = getDataDirectoryForProfile(profile)
+        if (hasStorageAccess()) {
+            targetDir.mkdirs()
+            File(targetDir, "tmp").mkdirs()
+            if (copyPropertiesFromCurrent) {
+                val srcProps = File(previousDir, "server.properties")
+                if (srcProps.exists() && srcProps.isFile) {
+                    runCatching { srcProps.copyTo(File(targetDir, "server.properties"), overwrite = false) }
+                }
+            }
+        }
+
+        val updatedList = currentProfiles + profile
+        _profiles.value = updatedList
+        prefs.edit().putString(KEY_SERVER_PROFILES, BlueLightPreferencesCodec.encodeProfiles(updatedList)).apply()
+
+        if (switchAfterCreate && _status.value == ServerStatus.STOPPED) {
+            switchProfile(profile.id)
+        }
+        _operationProgress.value = OperationProgress.Success("Created profile '${profile.name}'")
+        return profile
+    }
+
+    fun renameProfile(profileId: String, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) {
+            _operationProgress.value = OperationProgress.Error("Profile name cannot be empty")
+            return
+        }
+        val current = _profiles.value
+        val target = current.firstOrNull { it.id == profileId } ?: return
+        if (target.isDefault) {
+            _operationProgress.value = OperationProgress.Error("Default profile name cannot be changed")
+            return
+        }
+        val updated = current.map {
+            if (it.id == profileId) it.copy(name = trimmed) else it
+        }
+        _profiles.value = updated
+        prefs.edit().putString(KEY_SERVER_PROFILES, BlueLightPreferencesCodec.encodeProfiles(updated)).apply()
+        if (_activeProfile.value.id == profileId) {
+            _activeProfile.value = _activeProfile.value.copy(name = trimmed)
+            refreshWorkspaceInfo()
+        }
+        _operationProgress.value = OperationProgress.Success("Renamed profile to '$trimmed'")
+    }
+
+    fun deleteProfile(profileId: String, deleteFiles: Boolean) {
+        val target = _profiles.value.firstOrNull { it.id == profileId } ?: return
+        if (target.isDefault || target.id == ServerProfile.DEFAULT_PROFILE_ID) {
+            _operationProgress.value = OperationProgress.Error("Cannot delete the default profile")
+            return
+        }
+        if (_activeProfile.value.id == profileId && _status.value != ServerStatus.STOPPED) {
+            _operationProgress.value = OperationProgress.Error("Stop the running server before deleting active profile")
+            return
+        }
+
+        val updated = _profiles.value.filterNot { it.id == profileId }
+        _profiles.value = updated
+        prefs.edit().putString(KEY_SERVER_PROFILES, BlueLightPreferencesCodec.encodeProfiles(updated)).apply()
+
+        if (_activeProfile.value.id == profileId) {
+            switchProfile(ServerProfile.DEFAULT_PROFILE_ID)
+        }
+
+        if (deleteFiles && hasStorageAccess()) {
+            scope.launch {
+                runCatching { getDataDirectoryForProfile(target).deleteRecursively() }
+            }
+        }
+        _operationProgress.value = OperationProgress.Success("Removed profile '${target.name}'")
     }
 
     private fun resolvePhpBinary(): File? {
@@ -212,6 +374,7 @@ class ServerRepository private constructor(private val appContext: Context) {
         if (granted) {
             ensureDirectories()
         }
+        val profile = _activeProfile.value
         val dataDir = getDataDirectory()
         val hasPhar = granted && File(dataDir, "PocketMine-MP.phar").exists()
         val hasSrc = granted && File(dataDir, "src/pocketmine/PocketMine.php").exists()
@@ -223,6 +386,8 @@ class ServerRepository private constructor(private val appContext: Context) {
         }
 
         _workspaceInfo.value = ServerWorkspaceInfo(
+            profileId = profile.id,
+            profileName = profile.name,
             workspacePath = dataDir.absolutePath,
             hasStorageAccess = granted,
             hasPhar = hasPhar,
@@ -238,6 +403,7 @@ class ServerRepository private constructor(private val appContext: Context) {
     private fun appendSystemDiagnosticBanner() {
         val info = _workspaceInfo.value
         appendLog("\u001B[1;36m[BlueLight]\u001B[0m Console ready (Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT})")
+        appendLog("\u001B[36m[BlueLight]\u001B[0m Active profile: ${info.profileName}")
         appendLog("\u001B[36m[BlueLight]\u001B[0m Device ABIs: ${info.deviceAbis}")
         appendLog("\u001B[36m[BlueLight]\u001B[0m Server folder: ${info.workspacePath}")
         when {
@@ -789,7 +955,8 @@ class ServerRepository private constructor(private val appContext: Context) {
                 val backupDir = getBackupDirectory()
                 if (!backupDir.exists()) backupDir.mkdirs()
                 val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                val outFile = File(backupDir, "bluelight_backup_$stamp.zip")
+                val profileSlug = ServerProfile.sanitizeSlug(_activeProfile.value.name)
+                val outFile = File(backupDir, "bluelight_${profileSlug}_backup_$stamp.zip")
 
                 ZipOutputStream(FileOutputStream(outFile)).use { zos ->
                     zipDirectory(dataDir, dataDir, zos)
@@ -1115,6 +1282,9 @@ class ServerRepository private constructor(private val appContext: Context) {
     }
 
     companion object {
+        const val PREFS_NAME = "bluelight_prefs"
+        const val KEY_SERVER_PROFILES = "server_profiles_json"
+        const val KEY_ACTIVE_PROFILE_ID = "active_server_profile_id"
         const val MAX_CONSOLE_LINES = 2000
         const val MAX_DEDUP_KEYS = 300
         const val MAX_EDITABLE_BYTES = 512 * 1024L
