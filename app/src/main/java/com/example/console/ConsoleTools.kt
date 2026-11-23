@@ -62,7 +62,10 @@ object ConsoleTools {
     )
 
     fun classifyLogLine(rawLine: String): ConsoleLogLevel {
-        val plain = AnsiParser.stripAnsi(rawLine)
+        return classifyPlainLine(AnsiParser.stripAnsi(rawLine))
+    }
+
+    fun classifyPlainLine(plain: String): ConsoleLogLevel {
         val upper = plain.uppercase(Locale.US)
         return when {
             upper.contains("/ERROR]:") ||
@@ -94,10 +97,10 @@ object ConsoleTools {
         val needle = query.trim()
         if (level == ConsoleLogLevel.ALL && needle.isEmpty()) return lines
         return lines.filter { line ->
-            val levelMatches = level == ConsoleLogLevel.ALL || classifyLogLine(line.rawText) == level
+            val levelMatches = level == ConsoleLogLevel.ALL || line.level == level
             if (!levelMatches) return@filter false
             if (needle.isEmpty()) return@filter true
-            AnsiParser.stripAnsi(line.rawText).contains(needle, ignoreCase = true)
+            line.plainText.contains(needle, ignoreCase = true)
         }
     }
 

@@ -14,7 +14,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -51,7 +50,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -126,7 +125,7 @@ class MainActivity : ComponentActivity() {
                 !isDarkApp
             }
 
-            SideEffect {
+            LaunchedEffect(effectiveLightStatusBars, isDarkApp) {
                 val statusStyle = if (effectiveLightStatusBars) {
                     SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
                 } else {
@@ -182,6 +181,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
     val commandHistory by viewModel.commandHistory.collectAsStateWithLifecycle()
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
+    val profileCoreLabels by viewModel.profileCoreLabels.collectAsStateWithLifecycle()
     val overlayBubbleSize by viewModel.overlayBubbleSize.collectAsStateWithLifecycle()
     val overlayOpacityPercent by viewModel.overlayOpacityPercent.collectAsStateWithLifecycle()
     val overlayMacros by viewModel.overlayMacros.collectAsStateWithLifecycle()
@@ -415,6 +415,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             commandHistory = commandHistory,
                             profiles = profiles,
                             activeProfile = activeProfile,
+                            profileCoreLabels = profileCoreLabels,
                             overlayBubbleSize = overlayBubbleSize,
                             overlayOpacityPercent = overlayOpacityPercent,
                             overlayMacros = overlayMacros,
@@ -497,6 +498,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                         commandHistory = commandHistory,
                         profiles = profiles,
                         activeProfile = activeProfile,
+                        profileCoreLabels = profileCoreLabels,
                         overlayBubbleSize = overlayBubbleSize,
                         overlayOpacityPercent = overlayOpacityPercent,
                         overlayMacros = overlayMacros,
@@ -576,6 +578,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             commandHistory = commandHistory,
                             profiles = profiles,
                             activeProfile = activeProfile,
+                            profileCoreLabels = profileCoreLabels,
                             overlayBubbleSize = overlayBubbleSize,
                             overlayOpacityPercent = overlayOpacityPercent,
                             overlayMacros = overlayMacros,
@@ -763,6 +766,7 @@ private fun ScreenContentSwitch(
     commandHistory: List<String>,
     profiles: List<ServerProfile>,
     activeProfile: ServerProfile,
+    profileCoreLabels: Map<String, String>,
     overlayBubbleSize: OverlayBubbleSize,
     overlayOpacityPercent: Int,
     overlayMacros: List<OverlayMacro>,
@@ -776,16 +780,16 @@ private fun ScreenContentSwitch(
     onExportFile: (ServerFileItem) -> Unit,
     onBackupExport: () -> Unit
 ) {
-    Crossfade(targetState = selectedTab, label = "tabCrossfade") { tab ->
-        when (tab) {
-            AppTab.DASHBOARD -> DashboardScreen(
-                serverStatus = serverStatus,
-                workspaceInfo = workspaceInfo,
-                serverProperties = serverProperties,
-                operationProgress = operationProgress,
-                profiles = profiles,
-                activeProfile = activeProfile,
-                detectCoreLabel = { viewModel.detectCoreLabelForProfile(it) },
+    when (selectedTab) {
+        AppTab.DASHBOARD -> DashboardScreen(
+            serverStatus = serverStatus,
+            workspaceInfo = workspaceInfo,
+            serverProperties = serverProperties,
+            operationProgress = operationProgress,
+            profiles = profiles,
+            activeProfile = activeProfile,
+            profileCoreLabels = profileCoreLabels,
+            detectCoreLabel = { viewModel.detectCoreLabelForProfile(it) },
                 isOverlayActive = isOverlayActive,
                 canDrawOverlays = canDrawOverlays,
                 onToggleOverlay = onToggleOverlay,
@@ -807,11 +811,12 @@ private fun ScreenContentSwitch(
                 onSaveProperties = { updated -> viewModel.saveServerProperties(updated) },
                 onSwitchProfile = { viewModel.switchProfile(it) },
                 onCreateProfile = { name, copyProps -> viewModel.createProfile(name, copyProps) },
-                onRenameProfile = { id, newName -> viewModel.renameProfile(id, newName) },
-                onDeleteProfile = { id, deleteFiles -> viewModel.deleteProfile(id, deleteFiles) },
-                onDismissProgress = { viewModel.dismissOperationProgress() },
-                bottomContentPadding = bottomContentPadding
-            )
+            onRenameProfile = { id, newName -> viewModel.renameProfile(id, newName) },
+            onDeleteProfile = { id, deleteFiles -> viewModel.deleteProfile(id, deleteFiles) },
+            onRescanProfiles = { viewModel.rescanStorageProfiles() },
+            onDismissProgress = { viewModel.dismissOperationProgress() },
+            bottomContentPadding = bottomContentPadding
+        )
 
             AppTab.CONSOLE -> ConsoleScreen(
                 consoleLines = consoleLines,
@@ -880,36 +885,37 @@ private fun ScreenContentSwitch(
                 overlayBubbleSize = overlayBubbleSize,
                 overlayOpacityPercent = overlayOpacityPercent,
                 overlayMacros = overlayMacros,
-                profiles = profiles,
-                activeProfile = activeProfile,
-                serverStatus = serverStatus,
-                detectCoreLabel = { viewModel.detectCoreLabelForProfile(it) },
-                workspaceInfo = workspaceInfo,
-                onSelectAppTheme = { viewModel.setAppThemeMode(it) },
-                onTogglePureBlack = { viewModel.setPureBlack(it) },
-                onToggleDynamicColor = { viewModel.setDynamicColor(it) },
-                onSelectAccentPreset = { viewModel.setAccentPreset(it) },
-                onToggleFloatingNavBar = { viewModel.setFloatingNavBar(it) },
-                onSelectConsoleTheme = { viewModel.setConsoleThemeStyle(it) },
-                onToggleAnsi = { viewModel.setAnsiEnabled(it) },
-                onChangeFontSize = { viewModel.setFontSizeSp(it) },
-                onToggleAutoScroll = { viewModel.setAutoScroll(it) },
-                onSelectOverlayBubbleSize = { viewModel.setOverlayBubbleSize(it) },
-                onChangeOverlayOpacity = { viewModel.setOverlayOpacityPercent(it) },
-                onAddOverlayMacro = { label, command -> viewModel.addOverlayMacro(label, command) },
-                onUpdateOverlayMacro = { id, label, command -> viewModel.updateOverlayMacro(id, label, command) },
-                onRemoveOverlayMacro = { viewModel.removeOverlayMacro(it) },
-                onResetOverlayMacros = { viewModel.resetOverlayMacros() },
-                onSwitchProfile = { viewModel.switchProfile(it) },
-                onCreateProfile = { name, copyProps -> viewModel.createProfile(name, copyProps) },
-                onRenameProfile = { id, newName -> viewModel.renameProfile(id, newName) },
-                onDeleteProfile = { id, deleteFiles -> viewModel.deleteProfile(id, deleteFiles) },
-                onBackupLocal = { viewModel.backupServer(null) },
-                onBackupExport = onBackupExport,
-                onDeleteServerData = { viewModel.deleteServerData() },
-                onNavigateBack = { viewModel.selectTab(AppTab.DASHBOARD) },
-                bottomContentPadding = bottomContentPadding
-            )
-        }
+            profiles = profiles,
+            activeProfile = activeProfile,
+            profileCoreLabels = profileCoreLabels,
+            serverStatus = serverStatus,
+            detectCoreLabel = { viewModel.detectCoreLabelForProfile(it) },
+            workspaceInfo = workspaceInfo,
+            onSelectAppTheme = { viewModel.setAppThemeMode(it) },
+            onTogglePureBlack = { viewModel.setPureBlack(it) },
+            onToggleDynamicColor = { viewModel.setDynamicColor(it) },
+            onSelectAccentPreset = { viewModel.setAccentPreset(it) },
+            onToggleFloatingNavBar = { viewModel.setFloatingNavBar(it) },
+            onSelectConsoleTheme = { viewModel.setConsoleThemeStyle(it) },
+            onToggleAnsi = { viewModel.setAnsiEnabled(it) },
+            onChangeFontSize = { viewModel.setFontSizeSp(it) },
+            onToggleAutoScroll = { viewModel.setAutoScroll(it) },
+            onSelectOverlayBubbleSize = { viewModel.setOverlayBubbleSize(it) },
+            onChangeOverlayOpacity = { viewModel.setOverlayOpacityPercent(it) },
+            onAddOverlayMacro = { label, command -> viewModel.addOverlayMacro(label, command) },
+            onUpdateOverlayMacro = { id, label, command -> viewModel.updateOverlayMacro(id, label, command) },
+            onRemoveOverlayMacro = { viewModel.removeOverlayMacro(it) },
+            onResetOverlayMacros = { viewModel.resetOverlayMacros() },
+            onSwitchProfile = { viewModel.switchProfile(it) },
+            onCreateProfile = { name, copyProps -> viewModel.createProfile(name, copyProps) },
+            onRenameProfile = { id, newName -> viewModel.renameProfile(id, newName) },
+            onDeleteProfile = { id, deleteFiles -> viewModel.deleteProfile(id, deleteFiles) },
+            onRescanProfiles = { viewModel.rescanStorageProfiles() },
+            onBackupLocal = { viewModel.backupServer(null) },
+            onBackupExport = onBackupExport,
+            onDeleteServerData = { viewModel.deleteServerData() },
+            onNavigateBack = { viewModel.selectTab(AppTab.DASHBOARD) },
+            bottomContentPadding = bottomContentPadding
+        )
     }
 }

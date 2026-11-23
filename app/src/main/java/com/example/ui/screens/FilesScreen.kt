@@ -770,13 +770,8 @@ private fun SegmentedFileRow(
         else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
 
-    val subtitle = remember(item) {
-        val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(item.lastModifiedMs))
-        if (item.isDirectory) {
-            "${item.childCount} items • $dateStr"
-        } else {
-            "${formatFileSize(item.sizeBytes)} • $dateStr"
-        }
+    val subtitle = item.formattedSubtitle.ifEmpty {
+        if (item.isDirectory) "${item.childCount} items" else formatFileSize(item.sizeBytes)
     }
 
     MetroGroupedRow(

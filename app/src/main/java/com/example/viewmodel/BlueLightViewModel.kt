@@ -67,6 +67,7 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
     val browserFiles: StateFlow<List<ServerFileItem>> = repository.browserFiles
     val profiles: StateFlow<List<ServerProfile>> = repository.profiles
     val activeProfile: StateFlow<ServerProfile> = repository.activeProfile
+    val profileCoreLabels: StateFlow<Map<String, String>> = repository.profileCoreLabels
 
     private val _selectedTab = MutableStateFlow(AppTab.DASHBOARD)
     val selectedTab: StateFlow<AppTab> = _selectedTab.asStateFlow()
@@ -276,6 +277,10 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun detectCoreLabelForProfile(profile: ServerProfile): String {
         return repository.detectCoreLabelForProfile(profile)
+    }
+
+    fun rescanStorageProfiles() {
+        repository.rescanStorageProfiles()
     }
 
     // --- Floating Overlay Customization ---

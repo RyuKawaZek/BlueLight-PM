@@ -15,6 +15,11 @@ and this project tracks regular feature updates, bug fixes, and automated debug 
 
 ### Changed
 - **Compact UI & Refined Typography (`Type.kt`, `Shapes.kt`, `MetroComponents.kt`):** Tightened card radii, grouped row heights, floating top/bottom bars, and screen paddings across Dashboard, Console, Files, and Settings, and switched to crisp `Plus Jakarta Sans` + `Inter` + `JetBrains Mono` typography scales.
+- **Smoother Scrolling & Tab Switching (`MainActivity`, `Shapes.kt`, `MetroComponents.kt`, `ConsoleTools`):** Removed per-row `Animatable` allocation (`animateDpAsState`/`animateColorAsState`) and top-bar shadows, replaced `Crossfade` and per-recomposition `SideEffect` system bar updates with `LaunchedEffect`, precomputed console log levels/subtitles, and micro-batched log emissions.
+
+### Fixed
+- **UI Lag from Main-Thread Disk I/O (`ServerRepository`, `FilesScreen`):** Moved workspace directory scans, `server.properties` loading, profile creation directory setup, and directory listing onto a serialized background I/O dispatcher, eliminating `SimpleDateFormat` and nested `listFiles()` calls on the main thread.
+- **Storage Server Profile Auto-Discovery (`WorkspaceFileOps`, `ServerRepository`, `ProfileManagerDialog`):** Automatically detects existing server folders in `/storage/emulated/0/PocketMine-Profiles/*` and root storage directories (such as `/storage/emulated/0/BlueLight`) on scan/rescan, recognizes custom-named `.phar` files and `src/PocketMine.php`, and displays live core labels in the Profiles dialog.
 
 ## [2.0.0] - 2026-11-20
 

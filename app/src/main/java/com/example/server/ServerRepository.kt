@@ -9,9 +9,13 @@ import android.os.Build
 import android.os.Environment
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
+import com.example.console.AnsiParser
+import com.example.console.ConsoleLogLevel
+import com.example.console.ConsoleTools
 import com.example.service.ServerService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -24,7 +28,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -37,6 +40,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.Properties
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -51,7 +55,9 @@ enum class ServerStatus {
 data class ConsoleLine(
     val id: Long,
     val rawText: String,
-    val timestampMs: Long = System.currentTimeMillis()
+    val timestampMs: Long = System.currentTimeMillis(),
+    val plainText: String = AnsiParser.stripAnsi(rawText),
+    val level: ConsoleLogLevel = ConsoleTools.classifyPlainLine(plainText)
 )
 
 data class ServerWorkspaceInfo(
@@ -61,6 +67,7 @@ data class ServerWorkspaceInfo(
     val hasStorageAccess: Boolean = false,
     val hasPhar: Boolean = false,
     val hasSrcFolder: Boolean = false,
+    val customCoreLabel: String = "",
     val phpBinaryAvailable: Boolean = false,
     val phpBinaryPath: String = "",
     val deviceAbis: String = "",
@@ -69,6 +76,7 @@ data class ServerWorkspaceInfo(
     val detectedCoreLabel: String
         get() = when {
             !hasStorageAccess -> "Storage permission required"
+            customCoreLabel.isNotEmpty() -> customCoreLabel
             hasPhar -> "PocketMine-MP.phar"
             hasSrcFolder -> "src/pocketmine/PocketMine.php"
             else -> "No server core installed"
@@ -85,7 +93,8 @@ data class ServerFileItem(
     val isDirectory: Boolean,
     val sizeBytes: Long,
     val lastModifiedMs: Long,
-    val childCount: Int = 0
+    val childCount: Int = 0,
+    val formattedSubtitle: String = ""
 ) {
     val extension: String
         get() = name.substringAfterLast('.', "").lowercase(Locale.US)
@@ -123,6 +132,9 @@ class ServerRepository private constructor(private val appContext: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val ioSerial = Dispatchers.IO.limitedParallelism(1)
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -138,6 +150,9 @@ class ServerRepository private constructor(private val appContext: Context) {
 
     private val _activeProfile = MutableStateFlow(resolveSavedActiveProfile())
     val activeProfile: StateFlow<ServerProfile> = _activeProfile.asStateFlow()
+
+    private val _profileCoreLabels = MutableStateFlow<Map<String, String>>(emptyMap())
+    val profileCoreLabels: StateFlow<Map<String, String>> = _profileCoreLabels.asStateFlow()
 
     private val _status = MutableStateFlow(ServerStatus.STOPPED)
     val status: StateFlow<ServerStatus> = _status.asStateFlow()
@@ -169,17 +184,19 @@ class ServerRepository private constructor(private val appContext: Context) {
     private var lineIdCounter = 0L
     private val lineBuffer = ArrayDeque<ConsoleLine>(MAX_CONSOLE_LINES)
     private val logLock = Any()
+    private val logFlushPending = AtomicBoolean(false)
 
     private val dedupLock = Any()
     private val recentStdoutKeys = ArrayDeque<String>(MAX_DEDUP_KEYS)
     private val recentLogFileKeys = ArrayDeque<String>(MAX_DEDUP_KEYS)
 
     init {
-        ensureDirectories()
-        refreshWorkspaceInfo()
-        loadServerProperties()
-        browseDirectory("")
-        appendSystemDiagnosticBanner()
+        scope.launch(ioSerial) {
+            ensureDirectories()
+            refreshWorkspaceInfoInternal()
+            loadServerPropertiesInternal()
+            appendSystemDiagnosticBanner()
+        }
     }
 
     private fun resolveSavedActiveProfile(): ServerProfile {
@@ -203,10 +220,15 @@ class ServerRepository private constructor(private val appContext: Context) {
     }
 
     fun getDataDirectoryForProfile(profile: ServerProfile): File {
-        return if (profile.isDefault || profile.id == ServerProfile.DEFAULT_PROFILE_ID || profile.directoryName.isBlank()) {
-            File(Environment.getExternalStorageDirectory(), "PocketMine")
-        } else {
-            File(getProfilesRootDirectory(), profile.directoryName)
+        return when {
+            profile.isDefault || profile.id == ServerProfile.DEFAULT_PROFILE_ID ->
+                File(Environment.getExternalStorageDirectory(), "PocketMine")
+            profile.customPath.isNotEmpty() ->
+                File(profile.customPath)
+            profile.directoryName.isBlank() ->
+                File(Environment.getExternalStorageDirectory(), "PocketMine")
+            else ->
+                File(getProfilesRootDirectory(), profile.directoryName)
         }
     }
 
@@ -220,11 +242,15 @@ class ServerRepository private constructor(private val appContext: Context) {
 
     fun detectCoreLabelForProfile(profile: ServerProfile): String {
         if (!hasStorageAccess()) return "Storage permission required"
-        val dir = getDataDirectoryForProfile(profile)
-        return when {
-            File(dir, "PocketMine-MP.phar").exists() -> "PocketMine-MP.phar"
-            File(dir, "src/pocketmine/PocketMine.php").exists() -> "src/pocketmine/PocketMine.php"
-            else -> "No server core installed"
+        return _profileCoreLabels.value[profile.id]
+            ?: WorkspaceFileOps.resolveServerCore(getDataDirectoryForProfile(profile)).label
+    }
+
+    fun rescanStorageProfiles() {
+        scope.launch(ioSerial) {
+            prefs.edit().remove(KEY_HIDDEN_DISCOVERED_PATHS).apply()
+            refreshWorkspaceInfoInternal()
+            _operationProgress.value = OperationProgress.Success("Scanned storage for server profiles")
         }
     }
 
@@ -239,10 +265,12 @@ class ServerRepository private constructor(private val appContext: Context) {
         _activeProfile.value = target
         prefs.edit().putString(KEY_ACTIVE_PROFILE_ID, target.id).apply()
         _currentRelativePath.value = ""
-        ensureDirectories()
-        refreshWorkspaceInfo()
-        loadServerProperties()
-        appendLog("\u001B[1;36m[BlueLight]\u001B[0m Switched active profile to '${target.name}' (${getDataDirectory().absolutePath})")
+        scope.launch(ioSerial) {
+            ensureDirectories()
+            refreshWorkspaceInfoInternal()
+            loadServerPropertiesInternal()
+            appendLog("\u001B[1;36m[BlueLight]\u001B[0m Switched active profile to '${target.name}' (${getDataDirectory().absolutePath})")
+        }
         return true
     }
 
@@ -278,20 +306,25 @@ class ServerRepository private constructor(private val appContext: Context) {
 
         val previousDir = getDataDirectory()
         val targetDir = getDataDirectoryForProfile(profile)
-        if (hasStorageAccess()) {
-            targetDir.mkdirs()
-            File(targetDir, "tmp").mkdirs()
-            if (copyPropertiesFromCurrent) {
-                val srcProps = File(previousDir, "server.properties")
-                if (srcProps.exists() && srcProps.isFile) {
-                    runCatching { srcProps.copyTo(File(targetDir, "server.properties"), overwrite = false) }
-                }
-            }
-        }
-
         val updatedList = currentProfiles + profile
         _profiles.value = updatedList
         prefs.edit().putString(KEY_SERVER_PROFILES, BlueLightPreferencesCodec.encodeProfiles(updatedList)).apply()
+
+        scope.launch(ioSerial) {
+            if (hasStorageAccess()) {
+                targetDir.mkdirs()
+                File(targetDir, "tmp").mkdirs()
+                if (copyPropertiesFromCurrent) {
+                    val srcProps = File(previousDir, "server.properties")
+                    if (srcProps.exists() && srcProps.isFile) {
+                        runCatching { srcProps.copyTo(File(targetDir, "server.properties"), overwrite = false) }
+                    }
+                }
+            }
+            if (!switchAfterCreate || _status.value != ServerStatus.STOPPED) {
+                refreshWorkspaceInfoInternal()
+            }
+        }
 
         if (switchAfterCreate && _status.value == ServerStatus.STOPPED) {
             switchProfile(profile.id)
@@ -335,6 +368,12 @@ class ServerRepository private constructor(private val appContext: Context) {
             return
         }
 
+        val hiddenPaths = prefs.getStringSet(KEY_HIDDEN_DISCOVERED_PATHS, emptySet()).orEmpty().toMutableSet()
+        if (target.id.startsWith("discovered_") && !deleteFiles) {
+            hiddenPaths.add(getDataDirectoryForProfile(target).absolutePath)
+            prefs.edit().putStringSet(KEY_HIDDEN_DISCOVERED_PATHS, hiddenPaths).apply()
+        }
+
         val updated = _profiles.value.filterNot { it.id == profileId }
         _profiles.value = updated
         prefs.edit().putString(KEY_SERVER_PROFILES, BlueLightPreferencesCodec.encodeProfiles(updated)).apply()
@@ -344,8 +383,9 @@ class ServerRepository private constructor(private val appContext: Context) {
         }
 
         if (deleteFiles && hasStorageAccess()) {
-            scope.launch {
+            scope.launch(ioSerial) {
                 runCatching { getDataDirectoryForProfile(target).deleteRecursively() }
+                refreshWorkspaceInfoInternal()
             }
         }
         _operationProgress.value = OperationProgress.Success("Removed profile '${target.name}'")
@@ -370,19 +410,35 @@ class ServerRepository private constructor(private val appContext: Context) {
     }
 
     fun refreshWorkspaceInfo() {
+        scope.launch(ioSerial) {
+            refreshWorkspaceInfoInternal()
+        }
+    }
+
+    private fun refreshWorkspaceInfoInternal() {
         val granted = hasStorageAccess()
         if (granted) {
             ensureDirectories()
+            discoverProfilesOnStorageInternal()
         }
         val profile = _activeProfile.value
         val dataDir = getDataDirectory()
-        val hasPhar = granted && File(dataDir, "PocketMine-MP.phar").exists()
-        val hasSrc = granted && File(dataDir, "src/pocketmine/PocketMine.php").exists()
+        val core = if (granted) WorkspaceFileOps.resolveServerCore(dataDir) else null
         val phpBin = resolvePhpBinary()
         val backups = if (granted) {
-            getBackupDirectory().listFiles { f -> f.extension.equals("zip", ignoreCase = true) }?.size ?: 0
+            getBackupDirectory().list { _, name -> name.endsWith(".zip", ignoreCase = true) }?.size ?: 0
         } else {
             0
+        }
+
+        if (granted) {
+            val labels = HashMap<String, String>(_profiles.value.size)
+            _profiles.value.forEach { prof ->
+                labels[prof.id] = WorkspaceFileOps.resolveServerCore(getDataDirectoryForProfile(prof)).label
+            }
+            _profileCoreLabels.value = labels
+        } else {
+            _profileCoreLabels.value = emptyMap()
         }
 
         _workspaceInfo.value = ServerWorkspaceInfo(
@@ -390,14 +446,34 @@ class ServerRepository private constructor(private val appContext: Context) {
             profileName = profile.name,
             workspacePath = dataDir.absolutePath,
             hasStorageAccess = granted,
-            hasPhar = hasPhar,
-            hasSrcFolder = hasSrc,
+            hasPhar = core?.hasPhar == true,
+            hasSrcFolder = core?.hasSrc == true,
+            customCoreLabel = core?.label.orEmpty(),
             phpBinaryAvailable = phpBin != null && phpBin.exists(),
             phpBinaryPath = phpBin?.absolutePath ?: "Not bundled for ${Build.SUPPORTED_ABIS.joinToString()}",
             deviceAbis = Build.SUPPORTED_ABIS.joinToString(", "),
             backupCount = backups
         )
-        browseDirectory(_currentRelativePath.value)
+        browseDirectoryInternal(_currentRelativePath.value)
+    }
+
+    private fun discoverProfilesOnStorageInternal() {
+        val hiddenPaths = prefs.getStringSet(KEY_HIDDEN_DISCOVERED_PATHS, emptySet()).orEmpty()
+        val discovered = WorkspaceFileOps.discoverStorageProfiles(
+            profilesRoot = getProfilesRootDirectory(),
+            externalRoot = Environment.getExternalStorageDirectory(),
+            existingProfiles = _profiles.value
+        ).filterNot { profile ->
+            profile.id.startsWith("discovered_") &&
+                getDataDirectoryForProfile(profile).absolutePath in hiddenPaths
+        }
+        if (discovered != _profiles.value) {
+            _profiles.value = discovered
+            prefs.edit().putString(KEY_SERVER_PROFILES, BlueLightPreferencesCodec.encodeProfiles(discovered)).apply()
+            val activeNow = discovered.firstOrNull { it.id == _activeProfile.value.id }
+                ?: ServerProfile.defaultProfile()
+            _activeProfile.value = activeNow
+        }
     }
 
     private fun appendSystemDiagnosticBanner() {
@@ -414,21 +490,35 @@ class ServerRepository private constructor(private val appContext: Context) {
     }
 
     fun appendLog(rawLine: String) {
+        val line = ConsoleLine(
+            id = synchronized(logLock) {
+                if (lineBuffer.size >= MAX_CONSOLE_LINES) {
+                    lineBuffer.removeFirst()
+                }
+                lineIdCounter += 1
+                lineIdCounter
+            },
+            rawText = rawLine
+        )
         synchronized(logLock) {
-            if (lineBuffer.size >= MAX_CONSOLE_LINES) {
-                lineBuffer.removeFirst()
+            lineBuffer.addLast(line)
+        }
+        if (logFlushPending.compareAndSet(false, true)) {
+            scope.launch {
+                delay(40)
+                logFlushPending.set(false)
+                val snapshot = synchronized(logLock) { lineBuffer.toList() }
+                _consoleLines.value = snapshot
             }
-            lineIdCounter += 1
-            lineBuffer.addLast(ConsoleLine(id = lineIdCounter, rawText = rawLine))
-            _consoleLines.value = lineBuffer.toList()
         }
     }
 
     fun clearLogs() {
         synchronized(logLock) {
             lineBuffer.clear()
-            _consoleLines.value = emptyList()
         }
+        logFlushPending.set(false)
+        _consoleLines.value = emptyList()
     }
 
     fun startServer(ansiEnabled: Boolean) {
@@ -436,7 +526,7 @@ class ServerRepository private constructor(private val appContext: Context) {
 
         scope.launch {
             _status.value = ServerStatus.STARTING
-            refreshWorkspaceInfo()
+            withContext(ioSerial) { refreshWorkspaceInfoInternal() }
             val info = _workspaceInfo.value
 
             if (!info.hasStorageAccess) {
@@ -445,8 +535,11 @@ class ServerRepository private constructor(private val appContext: Context) {
                 return@launch
             }
 
-            if (!info.hasServerCore) {
-                appendLog("\u001B[1;31m[Error]\u001B[0m Cannot start: neither PocketMine-MP.phar nor src/pocketmine/PocketMine.php exists in ${info.workspacePath}.")
+            val dataDir = getDataDirectory()
+            val resolvedCore = WorkspaceFileOps.resolveServerCore(dataDir)
+            val entryFileObj = resolvedCore.entryFile
+            if (entryFileObj == null || !entryFileObj.exists()) {
+                appendLog("\u001B[1;31m[Error]\u001B[0m Cannot start: no .phar or PocketMine.php found in ${info.workspacePath}.")
                 _status.value = ServerStatus.STOPPED
                 return@launch
             }
@@ -458,17 +551,12 @@ class ServerRepository private constructor(private val appContext: Context) {
                 return@launch
             }
 
-            val dataDir = getDataDirectory()
             if (!dataDir.exists()) dataDir.mkdirs()
             val tmpDir = File(dataDir, "tmp")
             if (!tmpDir.exists()) tmpDir.mkdirs()
 
             val phpIni = ensurePhpIni(dataDir)
-            val entryFile = if (info.hasPhar) {
-                File(dataDir, "PocketMine-MP.phar").absolutePath
-            } else {
-                File(dataDir, "src/pocketmine/PocketMine.php").absolutePath
-            }
+            val entryFile = entryFileObj.absolutePath
 
             val args = listOf(
                 phpBinary.absolutePath,
@@ -612,6 +700,12 @@ class ServerRepository private constructor(private val appContext: Context) {
     // --- Direct File Manager for /storage/emulated/0/PocketMine ---
 
     fun browseDirectory(relativePath: String) {
+        scope.launch(ioSerial) {
+            browseDirectoryInternal(relativePath)
+        }
+    }
+
+    private fun browseDirectoryInternal(relativePath: String) {
         if (!hasStorageAccess()) {
             _currentRelativePath.value = ""
             _browserFiles.value = emptyList()
@@ -638,18 +732,30 @@ class ServerRepository private constructor(private val appContext: Context) {
         }
         _currentRelativePath.value = actualRel
 
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
         val children = targetDir.listFiles().orEmpty()
             .sortedWith(compareBy<File> { !it.isDirectory }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
             .map { file ->
                 val rel = file.relativeTo(rootDir).path.replace("\\", "/")
+                val isDir = file.isDirectory
+                val size = if (isDir) 0L else file.length()
+                val modMs = file.lastModified()
+                val childCount = if (isDir) file.list()?.size ?: 0 else 0
+                val dateStr = dateFormat.format(Date(modMs))
+                val subtitle = if (isDir) {
+                    "$childCount items • $dateStr"
+                } else {
+                    "${formatFileSize(size)} • $dateStr"
+                }
                 ServerFileItem(
                     name = file.name,
                     absolutePath = file.absolutePath,
                     relativePath = rel,
-                    isDirectory = file.isDirectory,
-                    sizeBytes = if (file.isDirectory) 0L else file.length(),
-                    lastModifiedMs = file.lastModified(),
-                    childCount = if (file.isDirectory) file.listFiles()?.size ?: 0 else 0
+                    isDirectory = isDir,
+                    sizeBytes = size,
+                    lastModifiedMs = modMs,
+                    childCount = childCount,
+                    formattedSubtitle = subtitle
                 )
             }
         _browserFiles.value = children
@@ -661,6 +767,15 @@ class ServerRepository private constructor(private val appContext: Context) {
         val parent = current.substringBeforeLast('/', missingDelimiterValue = "")
         browseDirectory(parent)
         return true
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        return when {
+            bytes < 1024 -> "$bytes B"
+            bytes < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+            bytes < 1024 * 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+            else -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+        }
     }
 
     private fun currentTargetDir(): File {
@@ -1101,6 +1216,12 @@ class ServerRepository private constructor(private val appContext: Context) {
     }
 
     fun loadServerProperties() {
+        scope.launch(ioSerial) {
+            loadServerPropertiesInternal()
+        }
+    }
+
+    private fun loadServerPropertiesInternal() {
         if (!hasStorageAccess()) {
             _serverProperties.value = ServerPropertiesConfig()
             return
@@ -1366,6 +1487,7 @@ class ServerRepository private constructor(private val appContext: Context) {
         const val PREFS_NAME = "bluelight_prefs"
         const val KEY_SERVER_PROFILES = "server_profiles_json"
         const val KEY_ACTIVE_PROFILE_ID = "active_server_profile_id"
+        private const val KEY_HIDDEN_DISCOVERED_PATHS = "hidden_discovered_profile_paths"
         const val MAX_CONSOLE_LINES = 2000
         const val MAX_DEDUP_KEYS = 300
         const val MAX_EDITABLE_BYTES = 512 * 1024L

@@ -117,6 +117,7 @@ fun SettingsScreen(
     overlayMacros: List<OverlayMacro>,
     profiles: List<ServerProfile>,
     activeProfile: ServerProfile,
+    profileCoreLabels: Map<String, String>,
     serverStatus: ServerStatus,
     detectCoreLabel: (ServerProfile) -> String,
     workspaceInfo: ServerWorkspaceInfo,
@@ -139,6 +140,7 @@ fun SettingsScreen(
     onCreateProfile: (String, Boolean) -> Unit,
     onRenameProfile: (String, String) -> Unit,
     onDeleteProfile: (String, Boolean) -> Unit,
+    onRescanProfiles: () -> Unit,
     onBackupLocal: () -> Unit,
     onBackupExport: () -> Unit,
     onDeleteServerData: () -> Unit,
@@ -729,12 +731,14 @@ fun SettingsScreen(
         ProfileManagerDialog(
             profiles = profiles,
             activeProfile = activeProfile,
+            profileCoreLabels = profileCoreLabels,
             serverStatus = serverStatus,
             detectCoreLabel = detectCoreLabel,
             onSwitchProfile = onSwitchProfile,
             onCreateProfile = onCreateProfile,
             onRenameProfile = onRenameProfile,
             onDeleteProfile = onDeleteProfile,
+            onRescanProfiles = onRescanProfiles,
             onDismiss = { showProfilesDialog = false }
         )
     }

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.DriveFileRenameOutline
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -32,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,12 +56,14 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 fun ProfileManagerDialog(
     profiles: List<ServerProfile>,
     activeProfile: ServerProfile,
+    profileCoreLabels: Map<String, String>,
     serverStatus: ServerStatus,
     detectCoreLabel: (ServerProfile) -> String,
     onSwitchProfile: (String) -> Unit,
     onCreateProfile: (name: String, copyProperties: Boolean) -> Unit,
     onRenameProfile: (profileId: String, newName: String) -> Unit,
     onDeleteProfile: (profileId: String, deleteFiles: Boolean) -> Unit,
+    onRescanProfiles: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -107,6 +111,17 @@ fun ProfileManagerDialog(
                             }
                         )
                     }
+                    IconButton(
+                        onClick = onRescanProfiles,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("rescan_profiles_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Rescan storage for server profiles"
+                        )
+                    }
                 }
 
                 LazyColumn(
@@ -117,12 +132,9 @@ fun ProfileManagerDialog(
                 ) {
                     itemsIndexed(profiles, key = { _, p -> p.id }) { index, profile ->
                         val isActive = profile.id == activeProfile.id
-                        val coreLabel = remember(profile.id, profiles.size) { detectCoreLabel(profile) }
-                        val dirSubtitle = if (profile.isDefault) {
-                            "/PocketMine • $coreLabel"
-                        } else {
-                            "/PocketMine-Profiles/${profile.directoryName} • $coreLabel"
-                        }
+                        val coreLabel = profileCoreLabels[profile.id] ?: detectCoreLabel(profile)
+                        val pathLabel = formatProfilePathLabel(profile)
+                        val dirSubtitle = "$pathLabel • $coreLabel"
 
                         MetroGroupedRow(
                             index = index,
@@ -313,7 +325,7 @@ fun ProfileManagerDialog(
                             onCheckedChange = { alsoDeleteFiles = it }
                         )
                         Text(
-                            text = "Also delete /PocketMine-Profiles/${target.directoryName} files",
+                            text = "Also delete ${formatProfilePathLabel(target)} files",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -339,6 +351,21 @@ fun ProfileManagerDialog(
                 }
             }
         )
+    }
+}
+
+private fun formatProfilePathLabel(profile: ServerProfile): String {
+    return when {
+        profile.isDefault -> "/PocketMine"
+        profile.customPath.isNotEmpty() -> {
+            val marker = "/storage/emulated/0"
+            if (profile.customPath.startsWith(marker)) {
+                profile.customPath.removePrefix(marker).ifEmpty { "/" }
+            } else {
+                profile.customPath
+            }
+        }
+        else -> "/PocketMine-Profiles/${profile.directoryName}"
     }
 }
 

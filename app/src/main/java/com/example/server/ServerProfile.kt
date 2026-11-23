@@ -9,7 +9,8 @@ data class ServerProfile(
     val name: String,
     val directoryName: String,
     val isDefault: Boolean = false,
-    val createdAtMs: Long = System.currentTimeMillis()
+    val createdAtMs: Long = System.currentTimeMillis(),
+    val customPath: String = ""
 ) {
     companion object {
         const val DEFAULT_PROFILE_ID = "default"
@@ -19,7 +20,8 @@ data class ServerProfile(
             name = "Default (PocketMine)",
             directoryName = "",
             isDefault = true,
-            createdAtMs = 0L
+            createdAtMs = 0L,
+            customPath = ""
         )
 
         fun sanitizeSlug(rawName: String): String {
@@ -64,6 +66,9 @@ object BlueLightPreferencesCodec {
             obj.put("name", profile.name)
             obj.put("directoryName", profile.directoryName)
             obj.put("createdAtMs", profile.createdAtMs)
+            if (profile.customPath.isNotEmpty()) {
+                obj.put("customPath", profile.customPath)
+            }
             array.put(obj)
         }
         return array.toString()
@@ -80,7 +85,8 @@ object BlueLightPreferencesCodec {
                 val id = obj.optString("id").trim()
                 val name = obj.optString("name").trim()
                 val dirName = obj.optString("directoryName").trim()
-                if (id.isEmpty() || name.isEmpty() || dirName.isEmpty() || !seenIds.add(id)) {
+                val customPath = obj.optString("customPath", "").trim()
+                if (id.isEmpty() || name.isEmpty() || (dirName.isEmpty() && customPath.isEmpty()) || !seenIds.add(id)) {
                     continue
                 }
                 list.add(
@@ -89,7 +95,8 @@ object BlueLightPreferencesCodec {
                         name = name,
                         directoryName = dirName,
                         isDefault = false,
-                        createdAtMs = obj.optLong("createdAtMs", 0L)
+                        createdAtMs = obj.optLong("createdAtMs", 0L),
+                        customPath = customPath
                     )
                 )
             }

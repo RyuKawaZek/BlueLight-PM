@@ -222,4 +222,181 @@ object WorkspaceFileOps {
     private fun isSameOrDescendant(targetCanon: String, ancestorCanon: String): Boolean {
         return targetCanon == ancestorCanon || targetCanon.startsWith("$ancestorCanon${File.separator}")
     }
+
+    data class ServerCoreResolution(
+        val label: String,
+        val entryFile: File?,
+        val hasPhar: Boolean,
+        val hasSrc: Boolean
+    )
+
+    fun resolveServerCore(dir: File): ServerCoreResolution {
+        if (!dir.exists() || !dir.isDirectory) {
+            return ServerCoreResolution(
+                label = "No server core installed",
+                entryFile = null,
+                hasPhar = false,
+                hasSrc = false
+            )
+        }
+
+        val defaultPhar = File(dir, "PocketMine-MP.phar")
+        if (defaultPhar.exists() && defaultPhar.isFile) {
+            return ServerCoreResolution(
+                label = defaultPhar.name,
+                entryFile = defaultPhar,
+                hasPhar = true,
+                hasSrc = false
+            )
+        }
+
+        val anyPhar = dir.listFiles()
+            ?.filter { it.isFile && !it.name.startsWith(".") && it.extension.equals("phar", ignoreCase = true) }
+            ?.minByOrNull { it.name.lowercase(Locale.US) }
+        if (anyPhar != null) {
+            return ServerCoreResolution(
+                label = anyPhar.name,
+                entryFile = anyPhar,
+                hasPhar = true,
+                hasSrc = false
+            )
+        }
+
+        val legacySrc = File(dir, "src/pocketmine/PocketMine.php")
+        if (legacySrc.exists() && legacySrc.isFile) {
+            return ServerCoreResolution(
+                label = "src/pocketmine/PocketMine.php",
+                entryFile = legacySrc,
+                hasPhar = false,
+                hasSrc = true
+            )
+        }
+
+        val altSrc = File(dir, "src/PocketMine.php")
+        if (altSrc.exists() && altSrc.isFile) {
+            return ServerCoreResolution(
+                label = "src/PocketMine.php",
+                entryFile = altSrc,
+                hasPhar = false,
+                hasSrc = true
+            )
+        }
+
+        return ServerCoreResolution(
+            label = "No server core installed",
+            entryFile = null,
+            hasPhar = false,
+            hasSrc = false
+        )
+    }
+
+    private val IGNORED_EXTERNAL_DIRS = setOf(
+        "android", "dcim", "download", "downloads", "music", "pictures",
+        "movies", "documents", "alarms", "notifications", "ringtones",
+        "podcasts", "audiobooks", "pocketmine", "pocketmine-profiles",
+        "pocketmine-backups", "lost+found"
+    )
+
+    fun discoverStorageProfiles(
+        profilesRoot: File,
+        externalRoot: File,
+        existingProfiles: List<ServerProfile>
+    ): List<ServerProfile> {
+        val defaultProfile = ServerProfile.defaultProfile()
+        val kept = mutableListOf<ServerProfile>()
+        kept.add(defaultProfile)
+
+        val knownProfileDirs = mutableSetOf<String>()
+        val knownCustomCanonPaths = mutableSetOf<String>()
+
+        existingProfiles.filter { !it.isDefault && it.id != ServerProfile.DEFAULT_PROFILE_ID }.forEach { profile ->
+            if (profile.customPath.isNotEmpty()) {
+                val dir = File(profile.customPath)
+                if (dir.exists() && dir.isDirectory) {
+                    kept.add(profile)
+                    runCatching { knownCustomCanonPaths.add(dir.canonicalPath) }
+                } else if (!profile.id.startsWith("discovered_")) {
+                    kept.add(profile)
+                    runCatching { knownCustomCanonPaths.add(dir.canonicalPath) }
+                }
+            } else {
+                val dir = File(profilesRoot, profile.directoryName)
+                if (dir.exists() && dir.isDirectory || !profile.id.startsWith("discovered_")) {
+                    kept.add(profile)
+                    knownProfileDirs.add(profile.directoryName.lowercase(Locale.US))
+                }
+            }
+        }
+
+        // 1. Scan /storage/emulated/0/PocketMine-Profiles/*
+        if (profilesRoot.exists() && profilesRoot.isDirectory) {
+            profilesRoot.listFiles()
+                ?.filter { it.isDirectory && !it.name.startsWith(".") && it.name != "tmp" }
+                ?.sortedBy { it.name.lowercase(Locale.US) }
+                ?.forEach { dir ->
+                    val dirKey = dir.name.lowercase(Locale.US)
+                    if (knownProfileDirs.add(dirKey)) {
+                        kept.add(
+                            ServerProfile(
+                                id = "discovered_prof_$dirKey",
+                                name = formatProfileName(dir.name),
+                                directoryName = dir.name,
+                                isDefault = false,
+                                createdAtMs = dir.lastModified(),
+                                customPath = ""
+                            )
+                        )
+                    }
+                }
+        }
+
+        // 2. Scan /storage/emulated/0/* for existing server workspaces (e.g. BlueLight, PocketMine-MP, etc.)
+        if (externalRoot.exists() && externalRoot.isDirectory) {
+            externalRoot.listFiles()
+                ?.filter { dir ->
+                    dir.isDirectory &&
+                        !dir.name.startsWith(".") &&
+                        dir.name.lowercase(Locale.US) !in IGNORED_EXTERNAL_DIRS
+                }
+                ?.sortedBy { it.name.lowercase(Locale.US) }
+                ?.forEach { dir ->
+                    val core = resolveServerCore(dir)
+                    val looksLikeServer = core.entryFile != null ||
+                        File(dir, "pocketmine.yml").isFile ||
+                        (File(dir, "server.properties").isFile &&
+                            (File(dir, "plugins").isDirectory ||
+                                File(dir, "worlds").isDirectory ||
+                                File(dir, "src").isDirectory))
+                    if (looksLikeServer) {
+                        val canon = runCatching { dir.canonicalPath }.getOrNull() ?: dir.absolutePath
+                        if (knownCustomCanonPaths.add(canon)) {
+                            val slugKey = ServerProfile.sanitizeSlug(dir.name)
+                            kept.add(
+                                ServerProfile(
+                                    id = "discovered_ext_$slugKey",
+                                    name = dir.name,
+                                    directoryName = dir.name,
+                                    isDefault = false,
+                                    createdAtMs = dir.lastModified(),
+                                    customPath = dir.absolutePath
+                                )
+                            )
+                        }
+                    }
+                }
+        }
+
+        return kept
+    }
+
+    private fun formatProfileName(folderName: String): String {
+        val hasUpper = folderName.any { it.isUpperCase() }
+        if (hasUpper) return folderName.replace('-', ' ').replace('_', ' ')
+        return folderName.split('-', '_')
+            .filter { it.isNotEmpty() }
+            .joinToString(" ") { part ->
+                part.replaceFirstChar { ch -> ch.titlecase(Locale.US) }
+            }
+            .ifEmpty { folderName }
+    }
 }

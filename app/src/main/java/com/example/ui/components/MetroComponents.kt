@@ -147,28 +147,21 @@ fun MetroTopBarIconButton(
     modifier: Modifier = Modifier,
     active: Boolean = false
 ) {
-    val containerColor by animateColorAsState(
-        targetValue = if (active) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        label = "topBarBtnBg"
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (active) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        label = "topBarBtnFg"
-    )
+    val containerColor = if (active) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val contentColor = if (active) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     FilledTonalIconButton(
         onClick = onClick,
         modifier = modifier
             .minimumInteractiveComponentSize()
-            .size(FloatingBarElementSize)
-            .shadow(FloatingBarShadow, CircleShape),
+            .size(FloatingBarElementSize),
         shape = CircleShape,
         colors = IconButtonDefaults.filledTonalIconButtonColors(
             containerColor = containerColor,
@@ -255,17 +248,13 @@ fun MetroGroupedRow(
     val isFirst = index == 0
     val isLast = index == count - 1
     val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val shape = segmentedGroupShape(isFirst = isFirst, isLast = isLast, pressed = isPressed)
+    val shape = segmentedGroupShape(isFirst = isFirst, isLast = isLast)
 
-    val containerColor by animateColorAsState(
-        targetValue = when {
-            selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-            isPressed -> MaterialTheme.colorScheme.surfaceContainerHighest
-            else -> MaterialTheme.colorScheme.surfaceContainer
-        },
-        label = "groupRowBg"
-    )
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
 
     val clickModifier = when {
         checked != null && onClick != null -> Modifier.toggleable(
@@ -469,22 +458,16 @@ fun MetroPillChip(
     selected: Boolean = false,
     enabled: Boolean = true
 ) {
-    val bg by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        label = "chipBg"
-    )
-    val fg by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        },
-        label = "chipFg"
-    )
+    val bg = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val fg = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
     Surface(
         onClick = onClick,
         enabled = enabled,

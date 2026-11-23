@@ -129,4 +129,91 @@ class FileOperationsTest {
         val dirs = WorkspaceFileOps.listDirectories(root)
         assertEquals(listOf("", "plugins", "plugins/Auth", "worlds"), dirs)
     }
+
+    @Test
+    fun resolveServerCore_detectsStandardCustomPharAndSrcEntryPoints() {
+        val standardDir = tempFolder.newFolder("core_standard")
+        File(standardDir, "PocketMine-MP.phar").writeText("phar")
+        assertEquals("PocketMine-MP.phar", WorkspaceFileOps.resolveServerCore(standardDir).label)
+
+        val customPharDir = tempFolder.newFolder("core_custom_phar")
+        File(customPharDir, "BlueLight.phar").writeText("phar")
+        val customRes = WorkspaceFileOps.resolveServerCore(customPharDir)
+        assertTrue(customRes.hasPhar)
+        assertEquals("BlueLight.phar", customRes.label)
+
+        val legacySrcDir = tempFolder.newFolder("core_legacy_src")
+        File(legacySrcDir, "src/pocketmine").mkdirs()
+        File(legacySrcDir, "src/pocketmine/PocketMine.php").writeText("<?php")
+        val legacyRes = WorkspaceFileOps.resolveServerCore(legacySrcDir)
+        assertTrue(legacyRes.hasSrc)
+        assertEquals("src/pocketmine/PocketMine.php", legacyRes.label)
+
+        val altSrcDir = tempFolder.newFolder("core_alt_src")
+        File(altSrcDir, "src").mkdirs()
+        File(altSrcDir, "src/PocketMine.php").writeText("<?php")
+        val altRes = WorkspaceFileOps.resolveServerCore(altSrcDir)
+        assertTrue(altRes.hasSrc)
+        assertEquals("src/PocketMine.php", altRes.label)
+
+        val emptyDir = tempFolder.newFolder("core_empty")
+        assertEquals(null, WorkspaceFileOps.resolveServerCore(emptyDir).entryFile)
+    }
+
+    @Test
+    fun discoverStorageProfiles_detectsProfilesInProfilesRootAndExternalRootWhileIgnoringSystemDirs() {
+        val extRoot = tempFolder.newFolder("ext_storage")
+        val profilesRoot = File(extRoot, "PocketMine-Profiles").apply { mkdirs() }
+        File(extRoot, "PocketMine").mkdirs()
+        File(extRoot, "PocketMine-Backups").mkdirs()
+
+        // Existing subfolders in PocketMine-Profiles
+        File(profilesRoot, "survival").mkdirs()
+        File(profilesRoot, "creative_hub").apply {
+            mkdirs()
+            File(this, "Genisys.phar").writeText("phar")
+        }
+        File(profilesRoot, "tmp").mkdirs() // should be skipped
+
+        // External server workspaces at root level
+        File(extRoot, "BlueLight").apply {
+            mkdirs()
+            File(this, "BlueLight.phar").writeText("phar")
+        }
+        File(extRoot, "PocketMine-Legacy").apply {
+            mkdirs()
+            File(this, "server.properties").writeText("motd=Legacy")
+            File(this, "plugins").mkdirs()
+        }
+
+        // System/ignored folders should never be added even if they contain files
+        File(extRoot, "DCIM").apply {
+            mkdirs()
+            File(this, "test.phar").writeText("ignored")
+        }
+        File(extRoot, "Android").apply {
+            mkdirs()
+            File(this, "pocketmine.yml").writeText("ignored: true")
+        }
+
+        val discovered = WorkspaceFileOps.discoverStorageProfiles(
+            profilesRoot = profilesRoot,
+            externalRoot = extRoot,
+            existingProfiles = emptyList()
+        )
+
+        val ids = discovered.map { it.id }
+        assertTrue(com.example.server.ServerProfile.DEFAULT_PROFILE_ID in ids)
+        assertTrue("discovered_prof_survival" in ids)
+        assertTrue("discovered_prof_creative_hub" in ids)
+        assertFalse("discovered_prof_tmp" in ids)
+
+        val blueLight = discovered.firstOrNull { it.name == "BlueLight" }
+        assertTrue(blueLight != null)
+        assertEquals(File(extRoot, "BlueLight").absolutePath, blueLight!!.customPath)
+
+        assertTrue(discovered.any { it.name == "PocketMine-Legacy" })
+        assertFalse(discovered.any { it.name.equals("DCIM", ignoreCase = true) })
+        assertFalse(discovered.any { it.name.equals("Android", ignoreCase = true) })
+    }
 }
