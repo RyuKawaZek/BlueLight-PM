@@ -169,6 +169,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
     val currentRelativePath by viewModel.currentRelativePath.collectAsStateWithLifecycle()
     val browserFiles by viewModel.browserFiles.collectAsStateWithLifecycle()
     val textEditorState by viewModel.textEditorState.collectAsStateWithLifecycle()
+    val fileClipboard by viewModel.fileClipboard.collectAsStateWithLifecycle()
     val ansiEnabled by viewModel.ansiEnabled.collectAsStateWithLifecycle()
     val fontSizeSp by viewModel.fontSizeSp.collectAsStateWithLifecycle()
     val autoScroll by viewModel.autoScroll.collectAsStateWithLifecycle()
@@ -215,10 +216,10 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
     }
 
     val importFileHereLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.importFileIntoCurrentDir(uri)
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.importMultipleFilesIntoCurrentDir(uris)
         }
     }
 
@@ -401,6 +402,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             currentRelativePath = currentRelativePath,
                             browserFiles = browserFiles,
                             textEditorState = textEditorState,
+                            fileClipboard = fileClipboard,
                             ansiEnabled = ansiEnabled,
                             fontSizeSp = fontSizeSp,
                             autoScroll = autoScroll,
@@ -455,7 +457,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             onOpenConsole = { viewModel.selectTab(AppTab.CONSOLE) },
                             onStartServer = { startServerWithPermissionCheck() },
                             onStopServer = { viewModel.stopServer() },
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                         )
                     }
                 }
@@ -482,6 +484,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                         currentRelativePath = currentRelativePath,
                         browserFiles = browserFiles,
                         textEditorState = textEditorState,
+                        fileClipboard = fileClipboard,
                         ansiEnabled = ansiEnabled,
                         fontSizeSp = fontSizeSp,
                         autoScroll = autoScroll,
@@ -547,7 +550,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             .weight(1f)
                             .fillMaxWidth()
                     ) {
-                        val bottomContentInset = if (floatingNavBar) 172.dp else 20.dp
+                        val bottomContentInset = if (floatingNavBar) 128.dp else 14.dp
                         ScreenContentSwitch(
                             selectedTab = selectedTab,
                             bottomContentPadding = bottomContentInset,
@@ -560,6 +563,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             currentRelativePath = currentRelativePath,
                             browserFiles = browserFiles,
                             textEditorState = textEditorState,
+                            fileClipboard = fileClipboard,
                             ansiEnabled = ansiEnabled,
                             fontSizeSp = fontSizeSp,
                             autoScroll = autoScroll,
@@ -639,7 +643,7 @@ fun BlueLightAppShell(viewModel: BlueLightViewModel) {
                             onOpenConsole = { viewModel.selectTab(AppTab.CONSOLE) },
                             onStartServer = { startServerWithPermissionCheck() },
                             onStopServer = { viewModel.stopServer() },
-                            modifier = Modifier.padding(horizontal = 16.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp)
                         )
                         MetroFloatingBottomBar(
                             items = navDestinations,
@@ -692,7 +696,7 @@ private fun ShellFloatingTopBar(
         leadingContent = {
             Box(
                 modifier = Modifier
-                    .size(10.dp)
+                    .size(9.dp)
                     .clip(CircleShape)
                     .background(dotColor)
             )
@@ -700,7 +704,7 @@ private fun ShellFloatingTopBar(
         title = {
             Text(
                 text = titleText,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 maxLines = 1
             )
         },
@@ -746,6 +750,7 @@ private fun ScreenContentSwitch(
     currentRelativePath: String,
     browserFiles: List<ServerFileItem>,
     textEditorState: com.example.viewmodel.TextEditorState,
+    fileClipboard: com.example.viewmodel.FileClipboardState?,
     ansiEnabled: Boolean,
     fontSizeSp: Float,
     autoScroll: Boolean,
@@ -833,6 +838,7 @@ private fun ScreenContentSwitch(
                 files = browserFiles,
                 operationProgress = operationProgress,
                 textEditorState = textEditorState,
+                fileClipboard = fileClipboard,
                 onRequestStorageAccess = onRequestStorageAccess,
                 onBrowseDirectory = { viewModel.browseDirectory(it) },
                 onNavigateUp = { viewModel.navigateUpDirectory() },
@@ -845,6 +851,14 @@ private fun ScreenContentSwitch(
                 onExportFile = onExportFile,
                 onRenameEntry = { item, newName -> viewModel.renameEntry(item, newName) },
                 onDeleteEntry = { viewModel.deleteEntry(it) },
+                onDeleteEntries = { viewModel.deleteEntries(it) },
+                onStageClipboard = { mode, items -> viewModel.setFileClipboard(mode, items) },
+                onPasteClipboardHere = { viewModel.pasteClipboardHere() },
+                onClearClipboard = { viewModel.clearFileClipboard() },
+                onMoveEntriesTo = { items, dest -> viewModel.moveEntries(items, dest) },
+                onCopyEntriesTo = { items, dest -> viewModel.copyEntries(items, dest) },
+                onZipEntries = { items, archiveName -> viewModel.zipEntries(items, archiveName) },
+                onListWorkspaceDirectories = { viewModel.listWorkspaceDirectories() },
                 onUpdateEditorContent = { viewModel.updateEditorContent(it) },
                 onSaveEditorFile = { viewModel.saveOpenTextFile() },
                 onCloseEditor = { viewModel.closeTextEditor() },

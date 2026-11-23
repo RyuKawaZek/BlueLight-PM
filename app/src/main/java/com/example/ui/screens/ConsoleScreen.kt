@@ -173,27 +173,27 @@ fun ConsoleScreen(
             .fillMaxSize()
             .background(tokens.background)
             .imePadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // Metrolist-style Floating Pill Header + Circular Action Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp),
+                    .height(40.dp),
                 shape = CircleShape,
                 color = tokens.toolbarBackground,
                 contentColor = tokens.toolbarContent
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -384,7 +384,7 @@ fun ConsoleScreen(
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                         ),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                 }
             }
@@ -395,9 +395,9 @@ fun ConsoleScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(16.dp))
                 .background(tokens.toolbarBackground.copy(alpha = 0.35f))
-                .border(1.dp, tokens.border, RoundedCornerShape(22.dp))
+                .border(1.dp, tokens.border, RoundedCornerShape(16.dp))
         ) {
             if (filteredLines.isEmpty()) {
                 Box(
@@ -570,9 +570,9 @@ fun ConsoleScreen(
                     Text(
                         text = macro.label,
                         fontFamily = JetBrainsMonoFontFamily,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                 }
             }
@@ -622,18 +622,18 @@ fun ConsoleScreen(
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 48.dp)
+                    .heightIn(min = 42.dp)
                     .clip(CircleShape)
                     .background(tokens.inputContainer)
                     .border(1.dp, tokens.border, CircleShape)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "> ",
                     color = tokens.promptAccent,
                     fontFamily = JetBrainsMonoFontFamily,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Box(modifier = Modifier.weight(1f)) {
@@ -642,7 +642,7 @@ fun ConsoleScreen(
                             text = stringResource(R.string.command_input_hint),
                             color = tokens.inputPlaceholder,
                             fontFamily = JetBrainsMonoFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -654,7 +654,7 @@ fun ConsoleScreen(
                         textStyle = TextStyle(
                             color = tokens.inputText,
                             fontFamily = JetBrainsMonoFontFamily,
-                            fontSize = 14.sp
+                            fontSize = 13.sp
                         ),
                         cursorBrush = SolidColor(tokens.promptAccent),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -684,18 +684,19 @@ fun ConsoleScreen(
                 },
                 enabled = commandValue.text.isNotBlank(),
                 shape = CircleShape,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = tokens.promptAccent,
                     contentColor = if (tokens.isDark) tokens.background else tokens.inputContainer
                 ),
                 modifier = Modifier
-                    .heightIn(min = 48.dp)
+                    .heightIn(min = 42.dp)
                     .testTag("console_send_button")
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.Send,
                     contentDescription = stringResource(R.string.action_send),
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(17.dp)
                 )
             }
         }
@@ -722,12 +723,12 @@ private fun ConsoleCircleAction(
             },
             contentColor = if (active) tokens.promptAccent else tokens.toolbarContent
         ),
-        modifier = modifier.size(44.dp)
+        modifier = modifier.size(38.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(18.dp)
         )
     }
 }

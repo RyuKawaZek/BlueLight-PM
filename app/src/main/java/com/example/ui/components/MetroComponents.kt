@@ -1,9 +1,12 @@
 package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -24,7 +27,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -56,6 +58,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -63,6 +66,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
@@ -75,6 +79,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.server.OperationProgress
 import com.example.server.ServerStatus
@@ -84,11 +89,11 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.Rose400
 import com.example.ui.theme.segmentedGroupShape
 
-private val FloatingBarElementSize = 48.dp
-private val FloatingBarShadow = 4.dp
+private val FloatingBarElementSize = 40.dp
+private val FloatingBarShadow = 2.dp
 
 /**
- * Metrolist-inspired floating pill top app bar with circular action buttons.
+ * Compact Metrolist-inspired floating pill top app bar with circular action buttons.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,8 +108,8 @@ fun MetroFloatingTopAppBar(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(TopAppBarDefaults.windowInsets.exclude(WindowInsets.captionBar))
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
@@ -117,9 +122,9 @@ fun MetroFloatingTopAppBar(
             shadowElevation = FloatingBarShadow
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 18.dp),
+                modifier = Modifier.padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 leadingContent?.invoke()
                 title()
@@ -161,6 +166,7 @@ fun MetroTopBarIconButton(
     FilledTonalIconButton(
         onClick = onClick,
         modifier = modifier
+            .minimumInteractiveComponentSize()
             .size(FloatingBarElementSize)
             .shadow(FloatingBarShadow, CircleShape),
         shape = CircleShape,
@@ -169,12 +175,16 @@ fun MetroTopBarIconButton(
             contentColor = contentColor
         )
     ) {
-        Icon(imageVector = icon, contentDescription = contentDescription)
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(19.dp)
+        )
     }
 }
 
 /**
- * Metrolist-inspired segmented grouped list section with primary label & stacked rows.
+ * Compact segmented grouped list section with crisp label & stacked rows.
  */
 @Composable
 fun MetroGroupedSection(
@@ -193,36 +203,36 @@ fun MetroGroupedSection(
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 color = titleColor,
                 modifier = Modifier.padding(
-                    start = 16.dp,
-                    end = 16.dp,
-                    bottom = if (description == null) 10.dp else 4.dp
+                    start = 10.dp,
+                    end = 10.dp,
+                    bottom = if (description == null) 6.dp else 2.dp
                 )
             )
         }
         if (description != null) {
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(
-                    start = 16.dp,
-                    end = 16.dp,
-                    bottom = 10.dp
+                    start = 10.dp,
+                    end = 10.dp,
+                    bottom = 6.dp
                 )
             )
         }
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
             content = content
         )
     }
 }
 
 /**
- * Metrolist segmented group row: top row has 20.dp top / 5.dp bottom radii, middle 5.dp, bottom 5.dp / 20.dp.
- * Corners smoothly animate toward 20.dp when pressed.
+ * Slim segmented group row with optional selection highlight and long-click support.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MetroGroupedRow(
     index: Int,
@@ -236,7 +246,9 @@ fun MetroGroupedRow(
     titleColor: Color = Color.Unspecified,
     enabled: Boolean = true,
     checked: Boolean? = null,
+    selected: Boolean = false,
     onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     leadingContent: (@Composable () -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null
 ) {
@@ -247,10 +259,10 @@ fun MetroGroupedRow(
     val shape = segmentedGroupShape(isFirst = isFirst, isLast = isLast, pressed = isPressed)
 
     val containerColor by animateColorAsState(
-        targetValue = if (isPressed) {
-            MaterialTheme.colorScheme.surfaceContainerHighest
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
+        targetValue = when {
+            selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            isPressed -> MaterialTheme.colorScheme.surfaceContainerHighest
+            else -> MaterialTheme.colorScheme.surfaceContainer
         },
         label = "groupRowBg"
     )
@@ -263,6 +275,13 @@ fun MetroGroupedRow(
             interactionSource = interactionSource,
             indication = LocalIndication.current,
             onValueChange = { onClick() }
+        )
+        onClick != null && onLongClick != null -> Modifier.combinedClickable(
+            interactionSource = interactionSource,
+            indication = LocalIndication.current,
+            enabled = enabled,
+            onClick = onClick,
+            onLongClick = onLongClick
         )
         onClick != null -> Modifier.clickable(
             interactionSource = interactionSource,
@@ -278,21 +297,28 @@ fun MetroGroupedRow(
             .fillMaxWidth()
             .clip(shape)
             .background(containerColor, shape)
+            .then(
+                if (selected) {
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), shape)
+                } else {
+                    Modifier
+                }
+            )
             .then(clickModifier)
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (leadingContent != null) {
             leadingContent()
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(10.dp))
         } else if (icon != null) {
             val resolvedTint = iconTint.takeOrElse { MaterialTheme.colorScheme.onSurfaceVariant }
             if (iconContainerColor != null) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(9.dp))
                         .background(iconContainerColor),
                     contentAlignment = Alignment.Center
                 ) {
@@ -300,23 +326,23 @@ fun MetroGroupedRow(
                         imageVector = icon,
                         contentDescription = null,
                         tint = resolvedTint,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             } else {
                 Box(
-                    modifier = Modifier.size(32.dp),
+                    modifier = Modifier.size(26.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = if (enabled) resolvedTint else resolvedTint.copy(alpha = 0.38f),
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(10.dp))
         }
 
         Column(modifier = Modifier.weight(1f)) {
@@ -331,10 +357,10 @@ fun MetroGroupedRow(
                 overflow = TextOverflow.Ellipsis
             )
             if (subtitle != null) {
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(1.dp))
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = if (enabled) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
@@ -347,15 +373,14 @@ fun MetroGroupedRow(
         }
 
         if (trailingContent != null) {
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             trailingContent()
         }
     }
 }
 
 /**
- * Custom segmented surface container for arbitrary child content (sliders, preview panels, chip rows)
- * inside a MetroGroupedSection.
+ * Compact segmented container for sliders, previews, and chip groups.
  */
 @Composable
 fun MetroGroupedCustomBlock(
@@ -378,14 +403,14 @@ fun MetroGroupedCustomBlock(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             content = content
         )
     }
 }
 
 /**
- * Metrolist Expressive Switch with Check/Close icon inside the thumb and haptic feedback.
+ * Compact Metrolist Expressive Switch with Check/Close thumb icon.
  */
 @Composable
 fun MetroExpressiveSwitch(
@@ -403,7 +428,7 @@ fun MetroExpressiveSwitch(
                 callback(next)
             }
         },
-        modifier = modifier,
+        modifier = modifier.scale(0.86f),
         enabled = enabled,
         thumbContent = {
             Icon(
@@ -416,12 +441,12 @@ fun MetroExpressiveSwitch(
 }
 
 /**
- * Metrolist-inspired scrollable horizontal pill chip shelf.
+ * Compact scrollable horizontal pill chip shelf.
  */
 @Composable
 fun MetroChipShelf(
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp),
     content: @Composable RowScope.() -> Unit
 ) {
     Row(
@@ -429,7 +454,7 @@ fun MetroChipShelf(
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(contentPadding),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
         content = content
     )
@@ -466,23 +491,23 @@ fun MetroPillChip(
         shape = CircleShape,
         color = bg,
         contentColor = fg,
-        modifier = modifier.heightIn(min = 40.dp)
+        modifier = modifier.heightIn(min = 32.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             if (icon != null) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 maxLines = 1
             )
         }
@@ -490,8 +515,7 @@ fun MetroPillChip(
 }
 
 /**
- * Metrolist MiniPlayer-inspired compact server bar shown above bottom navigation
- * when viewing Dashboard, Files, or Settings.
+ * Slim MiniPlayer-inspired server status bar above bottom navigation.
  */
 @Composable
 fun MetroMiniServerBar(
@@ -509,18 +533,18 @@ fun MetroMiniServerBar(
         ServerStatus.STOPPED -> Rose400
     }
     val statusText = when (serverStatus) {
-        ServerStatus.RUNNING -> "Running • UDP :$port"
-        ServerStatus.STARTING -> "Starting server..."
-        ServerStatus.STOPPING -> "Stopping server..."
+        ServerStatus.RUNNING -> "Running • :$port"
+        ServerStatus.STARTING -> "Starting..."
+        ServerStatus.STOPPING -> "Stopping..."
         ServerStatus.STOPPED -> "Stopped • Ready"
     }
 
     Surface(
         onClick = onOpenConsole,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shadowElevation = 6.dp,
+        shadowElevation = 3.dp,
         modifier = modifier
             .fillMaxWidth()
             .testTag("mini_server_bar")
@@ -528,14 +552,14 @@ fun MetroMiniServerBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
@@ -543,13 +567,13 @@ fun MetroMiniServerBar(
                     imageVector = Icons.Rounded.Terminal,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(17.dp)
                 )
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .size(8.dp)
+                        .padding(3.dp)
+                        .size(7.dp)
                         .clip(CircleShape)
                         .background(dotColor)
                 )
@@ -558,13 +582,13 @@ fun MetroMiniServerBar(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = coreLabel,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = statusText,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     fontFamily = JetBrainsMonoFontFamily,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -589,7 +613,9 @@ fun MetroMiniServerBar(
                         MaterialTheme.colorScheme.onErrorContainer
                     }
                 ),
-                modifier = Modifier.size(44.dp)
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .size(36.dp)
             ) {
                 Icon(
                     imageVector = if (isStopped) Icons.Rounded.PlayArrow else Icons.Rounded.Stop,
@@ -597,7 +623,8 @@ fun MetroMiniServerBar(
                         stringResource(R.string.action_start_server)
                     } else {
                         stringResource(R.string.action_stop_server)
-                    }
+                    },
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -613,7 +640,7 @@ data class MetroNavDestination<T>(
 )
 
 /**
- * Metrolist Floating Navigation Bar: sleek rounded capsule floating at the bottom.
+ * Slim floating capsule bottom navigation bar.
  */
 @Composable
 fun <T> MetroFloatingBottomBar(
@@ -627,20 +654,20 @@ fun <T> MetroFloatingBottomBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            shadowElevation = 8.dp,
+            shadowElevation = 5.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -672,24 +699,24 @@ fun <T> MetroFloatingBottomBar(
                         contentColor = contentColor,
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 48.dp)
+                            .heightIn(min = 44.dp)
                             .testTag(item.testTag)
                     ) {
                         Column(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
                             Icon(
                                 imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
                                 contentDescription = item.label,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(19.dp)
                             )
-                            Spacer(Modifier.height(2.dp))
+                            Spacer(Modifier.height(1.dp))
                             Text(
                                 text = item.label,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = MaterialTheme.typography.labelMedium.fontFamily,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontSize = 10.5.sp,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
                                 ),
                                 maxLines = 1,
@@ -726,12 +753,14 @@ fun <T> MetroDockedBottomBar(
                 icon = {
                     Icon(
                         imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
-                        contentDescription = item.label
+                        contentDescription = item.label,
+                        modifier = Modifier.size(20.dp)
                     )
                 },
                 label = {
                     Text(
                         text = item.label,
+                        style = MaterialTheme.typography.labelMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -767,14 +796,14 @@ fun MetroOperationBanner(
     Surface(
         color = containerColor,
         contentColor = contentColor,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -784,12 +813,12 @@ fun MetroOperationBanner(
                 Row(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Memory,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     val text = when (progress) {
                         is OperationProgress.Running -> progress.label
@@ -804,8 +833,11 @@ fun MetroOperationBanner(
                     )
                 }
                 if (progress !is OperationProgress.Running) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Dismiss")
+                    TextButton(
+                        onClick = onDismiss,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("Dismiss", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -833,23 +865,24 @@ fun MetroStoragePermissionCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Security,
-                    contentDescription = null
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = "Storage Access Required",
@@ -863,8 +896,9 @@ fun MetroStoragePermissionCard(
             Button(
                 onClick = onRequestStorageAccess,
                 shape = CircleShape,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 modifier = Modifier
-                    .heightIn(min = 48.dp)
+                    .heightIn(min = 40.dp)
                     .testTag("grant_storage_access_button")
             ) {
                 Text(stringResource(R.string.action_grant_storage))

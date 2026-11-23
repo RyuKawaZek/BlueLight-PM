@@ -12,11 +12,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 val BlueLightShapes = Shapes(
-    extraSmall = RoundedCornerShape(16.dp),
-    small = RoundedCornerShape(20.dp),
-    medium = RoundedCornerShape(24.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(24.dp)
 )
 
 @Composable
@@ -24,8 +24,8 @@ fun segmentedGroupShape(
     isFirst: Boolean,
     isLast: Boolean,
     pressed: Boolean = false,
-    outer: Dp = 20.dp,
-    inner: Dp = 5.dp
+    outer: Dp = 14.dp,
+    inner: Dp = 4.dp
 ): Shape {
     val spec = spring<Dp>(
         dampingRatio = Spring.DampingRatioNoBouncy,

@@ -43,6 +43,16 @@ sealed class TextEditorState {
     ) : TextEditorState()
 }
 
+enum class FileClipboardMode {
+    MOVE,
+    COPY
+}
+
+data class FileClipboardState(
+    val mode: FileClipboardMode,
+    val items: List<ServerFileItem>
+)
+
 class BlueLightViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences(ServerRepository.PREFS_NAME, Context.MODE_PRIVATE)
@@ -64,7 +74,7 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
     private val _ansiEnabled = MutableStateFlow(prefs.getBoolean(KEY_ANSI_ENABLED, true))
     val ansiEnabled: StateFlow<Boolean> = _ansiEnabled.asStateFlow()
 
-    private val _fontSizeSp = MutableStateFlow(prefs.getFloat(KEY_FONT_SIZE, 13f).coerceIn(10f, 24f))
+    private val _fontSizeSp = MutableStateFlow(prefs.getFloat(KEY_FONT_SIZE, 12f).coerceIn(9f, 22f))
     val fontSizeSp: StateFlow<Float> = _fontSizeSp.asStateFlow()
 
     private val _autoScroll = MutableStateFlow(prefs.getBoolean(KEY_AUTO_SCROLL, true))
@@ -121,6 +131,9 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
     private val _textEditorState = MutableStateFlow<TextEditorState>(TextEditorState.Closed)
     val textEditorState: StateFlow<TextEditorState> = _textEditorState.asStateFlow()
 
+    private val _fileClipboard = MutableStateFlow<FileClipboardState?>(null)
+    val fileClipboard: StateFlow<FileClipboardState?> = _fileClipboard.asStateFlow()
+
     fun selectTab(tab: AppTab) {
         _selectedTab.value = tab
         if (tab == AppTab.FILES) {
@@ -134,7 +147,7 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setFontSizeSp(size: Float) {
-        val clamped = size.coerceIn(10f, 24f)
+        val clamped = size.coerceIn(9f, 22f)
         _fontSizeSp.value = clamped
         prefs.edit().putFloat(KEY_FONT_SIZE, clamped).apply()
     }
@@ -242,7 +255,11 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
     // --- Multi-Server Profiles ---
 
     fun switchProfile(profileId: String): Boolean {
-        return repository.switchProfile(profileId)
+        val switched = repository.switchProfile(profileId)
+        if (switched) {
+            _fileClipboard.value = null
+        }
+        return switched
     }
 
     fun createProfile(name: String, copyPropertiesFromCurrent: Boolean = false) {
@@ -341,8 +358,71 @@ class BlueLightViewModel(application: Application) : AndroidViewModel(applicatio
         repository.deleteEntry(item)
     }
 
+    fun deleteEntries(items: List<ServerFileItem>) {
+        if (items.isEmpty()) return
+        val paths = items.map { it.absolutePath }.toSet()
+        repository.deleteEntries(items.map { it.absolutePath })
+        val currentClip = _fileClipboard.value
+        if (currentClip != null) {
+            val remaining = currentClip.items.filterNot { it.absolutePath in paths }
+            _fileClipboard.value = if (remaining.isEmpty()) null else currentClip.copy(items = remaining)
+        }
+    }
+
+    fun setFileClipboard(mode: FileClipboardMode, items: List<ServerFileItem>) {
+        if (items.isEmpty()) {
+            _fileClipboard.value = null
+            return
+        }
+        _fileClipboard.value = FileClipboardState(mode = mode, items = items)
+    }
+
+    fun clearFileClipboard() {
+        _fileClipboard.value = null
+    }
+
+    fun pasteClipboardHere() {
+        val clip = _fileClipboard.value ?: return
+        val dest = currentRelativePath.value
+        when (clip.mode) {
+            FileClipboardMode.MOVE -> {
+                repository.moveEntries(clip.items.map { it.absolutePath }, dest)
+                _fileClipboard.value = null
+            }
+            FileClipboardMode.COPY -> {
+                repository.copyEntries(clip.items.map { it.absolutePath }, dest)
+                _fileClipboard.value = null
+            }
+        }
+    }
+
+    fun moveEntries(items: List<ServerFileItem>, destRelativePath: String) {
+        if (items.isEmpty()) return
+        repository.moveEntries(items.map { it.absolutePath }, destRelativePath)
+        _fileClipboard.value = null
+    }
+
+    fun copyEntries(items: List<ServerFileItem>, destRelativePath: String) {
+        if (items.isEmpty()) return
+        repository.copyEntries(items.map { it.absolutePath }, destRelativePath)
+        _fileClipboard.value = null
+    }
+
+    fun zipEntries(items: List<ServerFileItem>, archiveName: String) {
+        if (items.isEmpty()) return
+        repository.zipEntries(items.map { it.absolutePath }, archiveName)
+    }
+
+    fun listWorkspaceDirectories(): List<String> {
+        return repository.listDirectoriesInWorkspace()
+    }
+
     fun importFileIntoCurrentDir(uri: Uri) {
         repository.importFileIntoCurrentDir(uri)
+    }
+
+    fun importMultipleFilesIntoCurrentDir(uris: List<Uri>) {
+        repository.importMultipleFilesIntoCurrentDir(uris)
     }
 
     fun extractZipEntry(item: ServerFileItem) {

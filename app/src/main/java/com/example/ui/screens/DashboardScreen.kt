@@ -132,8 +132,8 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = 840.dp),
-            contentPadding = PaddingValues(top = 6.dp, bottom = bottomContentPadding),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            contentPadding = PaddingValues(top = 4.dp, bottom = bottomContentPadding),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Metrolist-style horizontal quick-action chip shelf
             item {
@@ -193,7 +193,7 @@ fun DashboardScreen(
                     onOpenConsole = onOpenConsole,
                     onOpenProfiles = { showProfilesDialog = true },
                     onRefreshWorkspace = onRefreshWorkspace,
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp)
                 )
             }
 
@@ -202,7 +202,7 @@ fun DashboardScreen(
                     MetroStoragePermissionCard(
                         workspacePath = workspaceInfo.workspacePath,
                         onRequestStorageAccess = onRequestStorageAccess,
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp)
                     )
                 }
             }
@@ -212,7 +212,7 @@ fun DashboardScreen(
                     MetroOperationBanner(
                         progress = operationProgress,
                         onDismiss = onDismissProgress,
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp)
                     )
                 }
             }
@@ -221,7 +221,7 @@ fun DashboardScreen(
             item {
                 MetroGroupedSection(
                     title = "Runtime & Overlay",
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp)
                 ) {
                     MetroGroupedRow(
                         index = 0,
@@ -310,7 +310,7 @@ fun DashboardScreen(
                 MetroGroupedSection(
                     title = "server.properties",
                     description = "Tap any row to edit server configuration",
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp)
                 ) {
                     MetroGroupedRow(
                         index = 0,
@@ -432,7 +432,7 @@ private fun ServerHeroCard(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.primaryContainer
     ) {
         Box(
@@ -446,9 +446,9 @@ private fun ServerHeroCard(
                         )
                     )
                 )
-                .padding(20.dp)
+                .padding(14.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -456,26 +456,26 @@ private fun ServerHeroCard(
                 ) {
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Surface(
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                             shape = CircleShape
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(9.dp)
+                                        .size(8.dp)
                                         .clip(CircleShape)
                                         .background(statusColor)
                                 )
                                 Text(
                                     text = "$statusText • :$port",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
@@ -488,29 +488,31 @@ private fun ServerHeroCard(
                         )
                         Text(
                             text = workspaceInfo.detectedCoreLabel,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodySmall,
                             fontFamily = JetBrainsMonoFontFamily,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                         )
                         TextButton(
                             onClick = onOpenProfiles,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.testTag("hero_switch_profile_button")
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .heightIn(min = 34.dp)
+                                .testTag("hero_switch_profile_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Layers,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Switch Profile")
+                            Spacer(Modifier.width(5.dp))
+                            Text("Switch Profile", style = MaterialTheme.typography.labelMedium)
                         }
                     }
 
                     IconButton(
                         onClick = onRefreshWorkspace,
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.35f))
                             .testTag("refresh_workspace_button")
@@ -518,84 +520,89 @@ private fun ServerHeroCard(
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
                             contentDescription = "Refresh server workspace",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
 
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
                         onClick = onStartServer,
                         enabled = serverStatus == ServerStatus.STOPPED,
                         shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                         modifier = Modifier
-                            .heightIn(min = 48.dp)
+                            .heightIn(min = 40.dp)
                             .testTag("start_server_button")
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.PlayArrow,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.action_start_server))
+                        Spacer(Modifier.width(5.dp))
+                        Text(stringResource(R.string.action_start_server), style = MaterialTheme.typography.labelLarge)
                     }
 
                     FilledTonalButton(
                         onClick = onStopServer,
                         enabled = serverStatus == ServerStatus.RUNNING,
                         shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                         modifier = Modifier
-                            .heightIn(min = 48.dp)
+                            .heightIn(min = 40.dp)
                             .testTag("stop_server_button")
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Stop,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.action_stop_server))
+                        Spacer(Modifier.width(5.dp))
+                        Text(stringResource(R.string.action_stop_server), style = MaterialTheme.typography.labelLarge)
                     }
 
                     if (serverStatus != ServerStatus.STOPPED) {
                         OutlinedButton(
                             onClick = onForceKillServer,
                             shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = MaterialTheme.colorScheme.error
                             ),
                             modifier = Modifier
-                                .heightIn(min = 48.dp)
+                                .heightIn(min = 40.dp)
                                 .testTag("kill_server_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Dangerous,
                                 contentDescription = null,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.action_kill_server))
+                            Spacer(Modifier.width(5.dp))
+                            Text(stringResource(R.string.action_kill_server), style = MaterialTheme.typography.labelLarge)
                         }
                     }
 
                     FilledTonalButton(
                         onClick = onOpenConsole,
                         shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                         modifier = Modifier
-                            .heightIn(min = 48.dp)
+                            .heightIn(min = 40.dp)
                             .testTag("open_console_button")
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Terminal,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.action_open_console))
+                        Spacer(Modifier.width(5.dp))
+                        Text(stringResource(R.string.action_open_console), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }

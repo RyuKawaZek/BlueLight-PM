@@ -749,42 +749,137 @@ class ServerRepository private constructor(private val appContext: Context) {
     }
 
     fun deleteEntry(item: ServerFileItem) {
-        scope.launch {
-            try {
-                val target = File(item.absolutePath)
-                val ok = if (target.isDirectory) target.deleteRecursively() else target.delete()
-                if (ok) {
-                    refreshWorkspaceInfo()
-                    _operationProgress.value = OperationProgress.Success("Deleted '${item.name}'")
-                } else {
-                    _operationProgress.value = OperationProgress.Error("Could not delete '${item.name}'")
-                }
-            } catch (e: Exception) {
-                _operationProgress.value = OperationProgress.Error("Delete failed: ${e.message}")
-            }
-        }
+        deleteEntries(listOf(item.absolutePath))
     }
 
-    fun importFileIntoCurrentDir(uri: Uri) {
+    fun deleteEntries(sourcePaths: List<String>) {
+        if (sourcePaths.isEmpty()) return
         scope.launch {
             if (!hasStorageAccess()) {
                 _operationProgress.value = OperationProgress.Error("Storage access is required")
                 return@launch
             }
-            _operationProgress.value = OperationProgress.Running("Importing file...", null)
+            _operationProgress.value = OperationProgress.Running("Deleting ${sourcePaths.size} item(s)...", null)
+            val result = WorkspaceFileOps.deleteEntries(getDataDirectory(), sourcePaths)
+            refreshWorkspaceInfo()
+            _operationProgress.value = if (result.skippedOrFailed == 0) {
+                OperationProgress.Success("Deleted ${result.succeeded} item(s)")
+            } else {
+                OperationProgress.Error("Deleted ${result.succeeded} item(s), failed ${result.skippedOrFailed}")
+            }
+        }
+    }
+
+    fun moveEntries(sourcePaths: List<String>, destRelativePath: String) {
+        if (sourcePaths.isEmpty()) return
+        scope.launch {
+            if (!hasStorageAccess()) {
+                _operationProgress.value = OperationProgress.Error("Storage access is required")
+                return@launch
+            }
+            _operationProgress.value = OperationProgress.Running("Moving ${sourcePaths.size} item(s)...", null)
+            val result = WorkspaceFileOps.moveEntries(getDataDirectory(), sourcePaths, destRelativePath)
+            browseDirectory(destRelativePath)
+            refreshWorkspaceInfo()
+            _operationProgress.value = when {
+                result.succeeded > 0 && result.skippedOrFailed == 0 ->
+                    OperationProgress.Success("Moved ${result.succeeded} item(s)")
+                result.succeeded > 0 ->
+                    OperationProgress.Success("Moved ${result.succeeded} item(s), skipped ${result.skippedOrFailed} (conflict or same folder)")
+                else ->
+                    OperationProgress.Error("No items moved (target exists or invalid folder)")
+            }
+        }
+    }
+
+    fun copyEntries(sourcePaths: List<String>, destRelativePath: String) {
+        if (sourcePaths.isEmpty()) return
+        scope.launch {
+            if (!hasStorageAccess()) {
+                _operationProgress.value = OperationProgress.Error("Storage access is required")
+                return@launch
+            }
+            _operationProgress.value = OperationProgress.Running("Copying ${sourcePaths.size} item(s)...", null)
+            val result = WorkspaceFileOps.copyEntries(getDataDirectory(), sourcePaths, destRelativePath)
+            browseDirectory(destRelativePath)
+            refreshWorkspaceInfo()
+            _operationProgress.value = when {
+                result.succeeded > 0 && result.skippedOrFailed == 0 ->
+                    OperationProgress.Success("Copied ${result.succeeded} item(s)")
+                result.succeeded > 0 ->
+                    OperationProgress.Success("Copied ${result.succeeded} item(s), skipped ${result.skippedOrFailed}")
+                else ->
+                    OperationProgress.Error("Copy failed")
+            }
+        }
+    }
+
+    fun zipEntries(sourcePaths: List<String>, archiveName: String) {
+        if (sourcePaths.isEmpty()) return
+        val sanitizedBase = sanitizeSingleName(archiveName).removeSuffix(".zip").ifEmpty { "archive" }
+        val finalName = "$sanitizedBase.zip"
+        scope.launch {
+            if (!hasStorageAccess()) {
+                _operationProgress.value = OperationProgress.Error("Storage access is required")
+                return@launch
+            }
+            val targetDir = currentTargetDir()
+            _operationProgress.value = OperationProgress.Running("Creating $finalName...", null)
             try {
-                val fileName = sanitizeSingleName(resolveFileName(uri) ?: "imported_file")
-                    .ifEmpty { "imported_file" }
-                val dest = File(currentTargetDir(), fileName)
-                appContext.contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(dest).use { output ->
-                        input.copyTo(output)
-                    }
-                } ?: throw IllegalStateException("Could not read selected file")
+                val outFile = WorkspaceFileOps.zipEntries(
+                    rootDir = getDataDirectory(),
+                    targetDir = targetDir,
+                    sourcePaths = sourcePaths,
+                    archiveName = finalName
+                )
                 refreshWorkspaceInfo()
-                appendLog("\u001B[1;32m[BlueLight]\u001B[0m Imported '${dest.relativeTo(getDataDirectory()).path}'.")
-                _operationProgress.value = OperationProgress.Success("Imported '$fileName'")
+                _operationProgress.value = OperationProgress.Success("Created '${outFile.name}'")
             } catch (e: Exception) {
+                _operationProgress.value = OperationProgress.Error("Archive failed: ${e.message}")
+            }
+        }
+    }
+
+    fun listDirectoriesInWorkspace(): List<String> {
+        if (!hasStorageAccess()) return listOf("")
+        return WorkspaceFileOps.listDirectories(getDataDirectory())
+    }
+
+    fun importFileIntoCurrentDir(uri: Uri) {
+        importMultipleFilesIntoCurrentDir(listOf(uri))
+    }
+
+    fun importMultipleFilesIntoCurrentDir(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        scope.launch {
+            if (!hasStorageAccess()) {
+                _operationProgress.value = OperationProgress.Error("Storage access is required")
+                return@launch
+            }
+            _operationProgress.value = OperationProgress.Running("Importing ${uris.size} file(s)...", null)
+            var importedCount = 0
+            try {
+                val targetDir = currentTargetDir()
+                uris.forEach { uri ->
+                    val fileName = sanitizeSingleName(resolveFileName(uri) ?: "imported_file")
+                        .ifEmpty { "imported_file" }
+                    val dest = File(targetDir, fileName)
+                    appContext.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(dest).use { output ->
+                            input.copyTo(output)
+                        }
+                    } ?: throw IllegalStateException("Could not read selected file")
+                    importedCount += 1
+                    appendLog("\u001B[1;32m[BlueLight]\u001B[0m Imported '${dest.relativeTo(getDataDirectory()).path}'.")
+                }
+                refreshWorkspaceInfo()
+                _operationProgress.value = if (importedCount == 1) {
+                    OperationProgress.Success("Imported file")
+                } else {
+                    OperationProgress.Success("Imported $importedCount files")
+                }
+            } catch (e: Exception) {
+                refreshWorkspaceInfo()
                 _operationProgress.value = OperationProgress.Error("Import failed: ${e.message}")
             }
         }
@@ -959,7 +1054,7 @@ class ServerRepository private constructor(private val appContext: Context) {
                 val outFile = File(backupDir, "bluelight_${profileSlug}_backup_$stamp.zip")
 
                 ZipOutputStream(FileOutputStream(outFile)).use { zos ->
-                    zipDirectory(dataDir, dataDir, zos)
+                    WorkspaceFileOps.zipDirectory(dataDir, dataDir, zos)
                 }
 
                 if (exportUri != null) {
@@ -1244,20 +1339,6 @@ class ServerRepository private constructor(private val appContext: Context) {
         }
     }
 
-    private fun zipDirectory(rootDir: File, currentDir: File, zos: ZipOutputStream) {
-        val files = currentDir.listFiles() ?: return
-        for (file in files) {
-            if (file.name == "tmp") continue
-            val relPath = file.relativeTo(rootDir).path
-            if (file.isDirectory) {
-                zipDirectory(rootDir, file, zos)
-            } else {
-                zos.putNextEntry(ZipEntry(relPath))
-                FileInputStream(file).use { it.copyTo(zos) }
-                zos.closeEntry()
-            }
-        }
-    }
 
     private fun resolveFileName(uri: Uri): String? {
         if (uri.scheme == "content") {

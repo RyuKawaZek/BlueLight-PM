@@ -164,12 +164,12 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .widthIn(max = 840.dp),
             contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = 8.dp,
+                start = 12.dp,
+                end = 12.dp,
+                top = 4.dp,
                 bottom = bottomContentPadding
             ),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Section 1: Appearance (Metrolist-style grouped cards)
             item {
@@ -271,23 +271,23 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(10.dp))
                         FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.alpha(if (dynamicColor && supportsDynamicColor) 0.45f else 1f)
                         ) {
                             AccentPreset.entries.forEach { preset ->
                                 val selected = accentPreset == preset
                                 Box(
                                     modifier = Modifier
-                                        .size(44.dp)
+                                        .size(36.dp)
                                         .clip(CircleShape)
                                         .background(preset.swatchColor)
                                         .then(
                                             if (selected) {
                                                 Modifier.border(
-                                                    width = 3.dp,
+                                                    width = 2.5.dp,
                                                     color = MaterialTheme.colorScheme.onSurface,
                                                     shape = CircleShape
                                                 )
@@ -306,7 +306,7 @@ fun SettingsScreen(
                                             imageVector = Icons.Rounded.Check,
                                             contentDescription = null,
                                             tint = Color.White,
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
@@ -447,8 +447,8 @@ fun SettingsScreen(
                         Slider(
                             value = fontSizeSp,
                             onValueChange = onChangeFontSize,
-                            valueRange = 10f..24f,
-                            steps = 13,
+                            valueRange = 9f..22f,
+                            steps = 12,
                             modifier = Modifier.testTag("font_size_slider")
                         )
                     }

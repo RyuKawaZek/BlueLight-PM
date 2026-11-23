@@ -8,9 +8,13 @@ and this project tracks regular feature updates, bug fixes, and automated debug 
 ## [Unreleased]
 
 ### Added
+- **Multi-Select File Management (`FilesScreen`, `WorkspaceFileOps`, `ServerRepository`):** Added long-press and `Select` mode in the file browser with Select All / Clear controls, batch **Move**, **Copy**, **Zip**, and **Delete** actions, multi-file SAF import (`OpenMultipleDocuments`), persistent cross-folder Move/Copy clipboard bar, and a 1-tap workspace **Folder Picker** dialog.
 - **Floating Bubble Upgrades (`FloatingConsoleService`):** Saved bubble & panel coordinates across restarts (clamped to screen bounds), added bubble size (`Small`/`Medium`/`Large`) and opacity (`40%–100%`) controls in both Settings and an in-overlay quick-tune drawer, and added customizable 1-tap command macros (`/list`, `/save-all`, `/time set day`, `/gamemode c`, etc.).
 - **Console Filter, Search & Autocomplete (`ConsoleScreen`, `ConsoleTools`):** Added log-level filter chips (`All`, `Info`, `Warn`, `Error`, `Chat`), keyword search bar with filtered line count, and `/` command autocomplete suggestions with syntax hints and recent history.
 - **Multi-Server Profiles (`ServerRepository`, `ProfileManagerDialog`):** Added support for creating, renaming, deleting, and switching between isolated server workspaces under `/storage/emulated/0/PocketMine-Profiles/<slug>` alongside the default `/storage/emulated/0/PocketMine` workspace.
+
+### Changed
+- **Compact UI & Refined Typography (`Type.kt`, `Shapes.kt`, `MetroComponents.kt`):** Tightened card radii, grouped row heights, floating top/bottom bars, and screen paddings across Dashboard, Console, Files, and Settings, and switched to crisp `Plus Jakarta Sans` + `Inter` + `JetBrains Mono` typography scales.
 
 ## [2.0.0] - 2026-11-20
 
